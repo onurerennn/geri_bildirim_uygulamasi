@@ -1,160 +1,137 @@
 import { Request, Response } from 'express';
-import bcryptjs from 'bcryptjs';
-import { User } from '../models/User';
-import { UserRole } from '../types/enums';
+import bcrypt from 'bcryptjs';
+import User, { IUser } from '../models/User';
+import { UserRole } from '../types/UserRole';
 
-// Get all users
+// Kullanıcıları listele
 export const getUsers = async (req: Request, res: Response) => {
     try {
-        const users = await User.find(
-            req.user.role === UserRole.BUSINESS_ADMIN
-                ? { businessId: req.user.businessId }
-                : {}
-        ).select('-password');
+        const users = await User.find().select('-password');
         res.json(users);
     } catch (error) {
-        res.status(500).json({ message: 'Error fetching users' });
+        res.status(500).json({ message: 'Kullanıcılar listelenirken bir hata oluştu.' });
     }
 };
 
-// Get single user
+// Kullanıcı detayını getir
 export const getUser = async (req: Request, res: Response) => {
     try {
         const user = await User.findById(req.params.id).select('-password');
         if (!user) {
-            return res.status(404).json({ message: 'User not found' });
+            return res.status(404).json({ message: 'Kullanıcı bulunamadı.' });
         }
-
-        // Business Admin can only view users from their business
-        if (
-            req.user.role === UserRole.BUSINESS_ADMIN &&
-            user.businessId !== req.user.businessId
-        ) {
-            return res.status(403).json({ message: 'Access denied' });
-        }
-
         res.json(user);
     } catch (error) {
-        res.status(500).json({ message: 'Error fetching user' });
+        res.status(500).json({ message: 'Kullanıcı getirilirken bir hata oluştu.' });
     }
 };
 
-// Create user
+// Yeni kullanıcı oluştur
 export const createUser = async (req: Request, res: Response) => {
     try {
-        const { name, email, password, role, businessId } = req.body;
+        const { name, email, password, role } = req.body;
 
-        // Check if email already exists
+        // E-posta kontrolü
         const existingUser = await User.findOne({ email });
         if (existingUser) {
-            return res.status(400).json({ message: 'Email already exists' });
+            return res.status(400).json({ message: 'Bu e-posta adresi zaten kullanımda.' });
         }
 
-        // Business Admin can only create customers
-        if (
-            req.user.role === UserRole.BUSINESS_ADMIN &&
-            role !== UserRole.CUSTOMER
-        ) {
-            return res.status(403).json({ message: 'Can only create customer accounts' });
+        // Rol kontrolü
+        const requestingUser = req.user as IUser;
+        if (requestingUser.role !== UserRole.SUPER_ADMIN && role === UserRole.SUPER_ADMIN) {
+            return res.status(403).json({ message: 'Super Admin rolü atama yetkiniz yok.' });
         }
 
-        // Hash password
-        const salt = await bcryptjs.genSalt(10);
-        const hashedPassword = await bcryptjs.hash(password, salt);
+        if (requestingUser.role === UserRole.BUSINESS_ADMIN && role !== UserRole.CUSTOMER) {
+            return res.status(403).json({ message: 'Sadece müşteri rolü atayabilirsiniz.' });
+        }
 
         const user = new User({
             name,
             email,
-            password: hashedPassword,
+            password,
             role,
-            businessId: req.user.role === UserRole.BUSINESS_ADMIN ? req.user.businessId : businessId,
+            business: role === UserRole.BUSINESS_ADMIN ? req.body.business : undefined
         });
 
         await user.save();
-        const { password: _, ...userResponse } = user.toObject();
-        res.status(201).json(userResponse);
+        res.status(201).json({ message: 'Kullanıcı başarıyla oluşturuldu.', user });
     } catch (error) {
-        res.status(500).json({ message: 'Error creating user' });
+        res.status(500).json({ message: 'Kullanıcı oluşturulurken bir hata oluştu.' });
     }
 };
 
-// Update user
+// Kullanıcı güncelle
 export const updateUser = async (req: Request, res: Response) => {
     try {
-        const { name, email, password, role, businessId, isActive } = req.body;
-        const user = await User.findById(req.params.id);
+        const { name, email, role, isActive } = req.body;
+        const userId = req.params.id;
 
+        // Kullanıcı kontrolü
+        const user = await User.findById(userId);
         if (!user) {
-            return res.status(404).json({ message: 'User not found' });
+            return res.status(404).json({ message: 'Kullanıcı bulunamadı.' });
         }
 
-        // Business Admin restrictions
-        if (req.user.role === UserRole.BUSINESS_ADMIN) {
-            if (user.businessId !== req.user.businessId) {
-                return res.status(403).json({ message: 'Access denied' });
-            }
-            if (user.role !== UserRole.CUSTOMER || role !== UserRole.CUSTOMER) {
-                return res.status(403).json({ message: 'Can only modify customer accounts' });
-            }
+        // Rol kontrolü
+        const requestingUser = req.user as IUser;
+        if (requestingUser.role !== UserRole.SUPER_ADMIN && role === UserRole.SUPER_ADMIN) {
+            return res.status(403).json({ message: 'Super Admin rolü atama yetkiniz yok.' });
         }
 
-        // Prevent modifying Super Admin
-        if (user.role === UserRole.SUPER_ADMIN && req.user.role !== UserRole.SUPER_ADMIN) {
-            return res.status(403).json({ message: 'Cannot modify Super Admin' });
+        if (requestingUser.role === UserRole.BUSINESS_ADMIN && role !== UserRole.CUSTOMER) {
+            return res.status(403).json({ message: 'Sadece müşteri rolü atayabilirsiniz.' });
         }
 
-        if (email && email !== user.email) {
+        // E-posta değişikliği varsa kontrol et
+        if (email !== user.email) {
             const existingUser = await User.findOne({ email });
             if (existingUser) {
-                return res.status(400).json({ message: 'Email already exists' });
+                return res.status(400).json({ message: 'Bu e-posta adresi zaten kullanımda.' });
             }
         }
 
         user.name = name || user.name;
         user.email = email || user.email;
-        if (password) {
-            const salt = await bcryptjs.genSalt(10);
-            user.password = await bcryptjs.hash(password, salt);
-        }
         user.role = role || user.role;
-        user.businessId = businessId || user.businessId;
         user.isActive = isActive !== undefined ? isActive : user.isActive;
 
+        if (role === UserRole.BUSINESS_ADMIN) {
+            user.business = req.body.business;
+        }
+
         await user.save();
-        const { password: _, ...userResponse } = user.toObject();
-        res.json(userResponse);
+        res.json({ message: 'Kullanıcı başarıyla güncellendi.', user });
     } catch (error) {
-        res.status(500).json({ message: 'Error updating user' });
+        res.status(500).json({ message: 'Kullanıcı güncellenirken bir hata oluştu.' });
     }
 };
 
-// Delete user
+// Kullanıcı sil
 export const deleteUser = async (req: Request, res: Response) => {
     try {
-        const user = await User.findById(req.params.id);
+        const userId = req.params.id;
+        const requestingUser = req.user as IUser;
 
+        // Kullanıcı kontrolü
+        const user = await User.findById(userId);
         if (!user) {
-            return res.status(404).json({ message: 'User not found' });
+            return res.status(404).json({ message: 'Kullanıcı bulunamadı.' });
         }
 
-        // Business Admin restrictions
-        if (req.user.role === UserRole.BUSINESS_ADMIN) {
-            if (user.businessId !== req.user.businessId) {
-                return res.status(403).json({ message: 'Access denied' });
-            }
-            if (user.role !== UserRole.CUSTOMER) {
-                return res.status(403).json({ message: 'Can only delete customer accounts' });
-            }
+        // Rol kontrolü
+        if (requestingUser.role === UserRole.BUSINESS_ADMIN && user.role !== UserRole.CUSTOMER) {
+            return res.status(403).json({ message: 'Sadece müşteri rolündeki kullanıcıları silebilirsiniz.' });
         }
 
-        // Prevent deleting Super Admin
         if (user.role === UserRole.SUPER_ADMIN) {
-            return res.status(403).json({ message: 'Cannot delete Super Admin' });
+            return res.status(403).json({ message: 'Super Admin kullanıcıları silinemez.' });
         }
 
-        await user.deleteOne();
-        res.json({ message: 'User deleted successfully' });
+        await User.findByIdAndDelete(userId);
+        res.json({ message: 'Kullanıcı başarıyla silindi.' });
     } catch (error) {
-        res.status(500).json({ message: 'Error deleting user' });
+        res.status(500).json({ message: 'Kullanıcı silinirken bir hata oluştu.' });
     }
 }; 

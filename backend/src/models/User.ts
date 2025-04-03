@@ -1,60 +1,52 @@
-import mongoose from 'mongoose';
+import mongoose, { Schema, Document } from 'mongoose';
 import bcrypt from 'bcryptjs';
-import { UserRole } from '../types/enums';
+import { UserRole } from '../types/UserRole';
 
-export interface IUser extends mongoose.Document {
+export interface IUser extends Document {
+    name: string;
     email: string;
     password: string;
-    name: string;
     role: UserRole;
-    businessId?: mongoose.Types.ObjectId;
+    business?: mongoose.Types.ObjectId;
     isActive: boolean;
-    lastLogin?: Date;
     createdAt: Date;
     updatedAt: Date;
     comparePassword(candidatePassword: string): Promise<boolean>;
 }
 
-const userSchema = new mongoose.Schema({
-    email: {
-        type: String,
-        required: true,
-        unique: true,
-        trim: true,
-        lowercase: true,
+const userSchema = new Schema<IUser>(
+    {
+        name: {
+            type: String,
+            required: true,
+        },
+        email: {
+            type: String,
+            required: true,
+            unique: true,
+        },
+        password: {
+            type: String,
+            required: true,
+        },
+        role: {
+            type: String,
+            enum: Object.values(UserRole),
+            required: true,
+        },
+        business: {
+            type: Schema.Types.ObjectId,
+            ref: 'Business',
+        },
+        isActive: {
+            type: Boolean,
+            default: true,
+        },
     },
-    password: {
-        type: String,
-        required: true,
-        minlength: 6,
-    },
-    name: {
-        type: String,
-        required: true,
-        trim: true,
-    },
-    role: {
-        type: String,
-        enum: Object.values(UserRole),
-        default: UserRole.CUSTOMER,
-    },
-    businessId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Business',
-        required: function () {
-            return this.role === UserRole.BUSINESS_ADMIN;
-        }
-    },
-    isActive: {
-        type: Boolean,
-        default: true
-    },
-    lastLogin: {
-        type: Date
+    {
+        timestamps: true,
     }
-}, {
-    timestamps: true,
-});
+);
 
 userSchema.pre('save', async function (next) {
     if (!this.isModified('password')) return next();
@@ -79,4 +71,4 @@ userSchema.methods.toJSON = function () {
     return user;
 };
 
-export const User = mongoose.model<IUser>('User', userSchema); 
+export default mongoose.model<IUser>('User', userSchema); 
