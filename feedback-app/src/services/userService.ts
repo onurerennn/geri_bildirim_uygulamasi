@@ -1,10 +1,11 @@
 import api from './api';
+import { UserRole } from '../types/UserRole';
 
 export interface User {
     _id: string;
     name: string;
     email: string;
-    role: 'SUPER_ADMIN' | 'BUSINESS_ADMIN' | 'CUSTOMER';
+    role: UserRole;
     businessId?: string;
     isActive: boolean;
     createdAt: string;
@@ -14,7 +15,7 @@ export interface CreateUserData {
     name: string;
     email: string;
     password: string;
-    role: User['role'];
+    role: UserRole;
     businessId?: string;
 }
 
@@ -22,7 +23,7 @@ export interface UpdateUserData {
     name?: string;
     email?: string;
     password?: string;
-    role?: User['role'];
+    role?: UserRole;
     businessId?: string;
     isActive?: boolean;
 }

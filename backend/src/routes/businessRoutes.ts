@@ -1,29 +1,37 @@
 import express from 'express';
-import * as businessController from '../controllers/businessController';
-import { auth } from '../middleware/auth';
-import { isAdminOrSuperAdmin, isSuperAdmin } from '../middleware/roleAuth';
+import {
+    getBusinesses,
+    getBusiness,
+    createBusiness,
+    updateBusiness,
+    deleteBusiness,
+    approveBusiness,
+} from '../controllers/businessController';
+import { authenticate } from '../middleware/authMiddleware';
+import { authorize } from '../middleware/roleMiddleware';
+import { UserRole } from '../types/UserRole';
 
 const router = express.Router();
 
-// All routes require authentication
-router.use(auth);
+// Tüm rotalar için authentication gerekli
+router.use(authenticate);
 
-// Get all businesses (Super Admin and Business Admin only)
-router.get('/', isAdminOrSuperAdmin, businessController.getBusinesses);
+// İşletmeleri listele
+router.get('/', authorize([UserRole.SUPER_ADMIN, UserRole.BUSINESS_ADMIN]), getBusinesses);
 
-// Get single business (Super Admin and Business Admin only)
-router.get('/:id', isAdminOrSuperAdmin, businessController.getBusiness);
+// İşletme detayı getir
+router.get('/:id', authorize([UserRole.SUPER_ADMIN, UserRole.BUSINESS_ADMIN]), getBusiness);
 
-// Create business (Super Admin only)
-router.post('/', isSuperAdmin, businessController.createBusiness);
+// Yeni işletme oluştur
+router.post('/', authorize([UserRole.SUPER_ADMIN]), createBusiness);
 
-// Update business (Super Admin only)
-router.put('/:id', isSuperAdmin, businessController.updateBusiness);
+// İşletme güncelle
+router.put('/:id', authorize([UserRole.SUPER_ADMIN]), updateBusiness);
 
-// Delete business (Super Admin only)
-router.delete('/:id', isSuperAdmin, businessController.deleteBusiness);
+// İşletme sil
+router.delete('/:id', authorize([UserRole.SUPER_ADMIN]), deleteBusiness);
 
-// Approve business (Super Admin only)
-router.post('/:id/approve', isSuperAdmin, businessController.approveBusiness);
+// İşletme onayla
+router.post('/:id/approve', authorize([UserRole.SUPER_ADMIN]), approveBusiness);
 
 export default router; 

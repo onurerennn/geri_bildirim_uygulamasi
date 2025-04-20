@@ -1,66 +1,61 @@
-import mongoose, { Document } from 'mongoose';
+import mongoose, { Schema, Document } from 'mongoose';
 
-export interface Business extends Document {
+export interface IBusiness extends Document {
     name: string;
     address: string;
     phone: string;
     email: string;
-    description?: string;
+    description: string;
     logo?: string;
     isApproved: boolean;
     isActive: boolean;
     approvedBy?: mongoose.Types.ObjectId;
-    approvedAt?: Date;
     createdAt: Date;
     updatedAt: Date;
 }
 
-const businessSchema = new mongoose.Schema({
-    name: {
-        type: String,
-        required: true,
-        trim: true,
+const businessSchema = new Schema<IBusiness>(
+    {
+        name: {
+            type: String,
+            required: true,
+        },
+        address: {
+            type: String,
+            required: true,
+        },
+        phone: {
+            type: String,
+            required: true,
+        },
+        email: {
+            type: String,
+            required: true,
+            unique: true,
+        },
+        description: {
+            type: String,
+            required: true,
+        },
+        logo: {
+            type: String,
+        },
+        isApproved: {
+            type: Boolean,
+            default: false,
+        },
+        isActive: {
+            type: Boolean,
+            default: true,
+        },
+        approvedBy: {
+            type: Schema.Types.ObjectId,
+            ref: 'User',
+        },
     },
-    address: {
-        type: String,
-        required: true,
-        trim: true,
-    },
-    phone: {
-        type: String,
-        required: true,
-        trim: true,
-    },
-    email: {
-        type: String,
-        required: true,
-        trim: true,
-        lowercase: true,
-    },
-    description: {
-        type: String,
-        trim: true,
-    },
-    logo: {
-        type: String,
-    },
-    isApproved: {
-        type: Boolean,
-        default: false,
-    },
-    isActive: {
-        type: Boolean,
-        default: true,
-    },
-    approvedBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-    },
-    approvedAt: {
-        type: Date,
-    },
-}, {
-    timestamps: true,
-});
+    {
+        timestamps: true,
+    }
+);
 
-export const Business = mongoose.model<Business>('Business', businessSchema); 
+export default mongoose.model<IBusiness>('Business', businessSchema); 

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
     Container,
     Paper,
+    Typography,
     Table,
     TableBody,
     TableCell,
@@ -9,51 +10,53 @@ import {
     TableHead,
     TableRow,
     Button,
+    IconButton,
     Dialog,
     DialogTitle,
     DialogContent,
     DialogActions,
     TextField,
-    IconButton,
-    Typography,
-    Box,
     Chip,
+    Box,
 } from '@mui/material';
 import {
+    Add as AddIcon,
     Edit as EditIcon,
     Delete as DeleteIcon,
-    CheckCircle as ApproveIcon,
+    CheckCircle as CheckCircleIcon,
 } from '@mui/icons-material';
-import businessService, {
-    Business,
-    CreateBusinessData,
-    UpdateBusinessData,
-} from '../services/businessService';
+import businessService, { Business, CreateBusinessData, UpdateBusinessData } from '../services/businessService';
+import { useAuth } from '../contexts/AuthContext';
+import { UserRole } from '../types/UserRole';
+import { formatDate } from '../utils/dateUtils';
+
+interface BusinessFormData extends CreateBusinessData { }
 
 const Businesses = () => {
     const [businesses, setBusinesses] = useState<Business[]>([]);
     const [open, setOpen] = useState(false);
     const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null);
-    const [formData, setFormData] = useState<CreateBusinessData | UpdateBusinessData>({
+    const [formData, setFormData] = useState<BusinessFormData>({
         name: '',
         address: '',
         phone: '',
         email: '',
         description: '',
     });
-
-    useEffect(() => {
-        fetchBusinesses();
-    }, []);
+    const { user } = useAuth();
 
     const fetchBusinesses = async () => {
         try {
             const data = await businessService.getBusinesses();
             setBusinesses(data);
         } catch (error) {
-            console.error('Error fetching businesses:', error);
+            console.error('İşletmeler yüklenirken hata oluştu:', error);
         }
     };
+
+    useEffect(() => {
+        fetchBusinesses();
+    }, []);
 
     const handleOpen = (business?: Business) => {
         if (business) {
@@ -90,27 +93,28 @@ const Businesses = () => {
         });
     };
 
-    const handleSubmit = async () => {
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
         try {
             if (selectedBusiness) {
                 await businessService.updateBusiness(selectedBusiness._id, formData);
             } else {
-                await businessService.createBusiness(formData as CreateBusinessData);
+                await businessService.createBusiness(formData);
             }
-            fetchBusinesses();
             handleClose();
+            fetchBusinesses();
         } catch (error) {
-            console.error('Error saving business:', error);
+            console.error('İşletme kaydedilirken hata oluştu:', error);
         }
     };
 
     const handleDelete = async (id: string) => {
-        if (window.confirm('Are you sure you want to delete this business?')) {
+        if (window.confirm('Bu işletmeyi silmek istediğinizden emin misiniz?')) {
             try {
                 await businessService.deleteBusiness(id);
                 fetchBusinesses();
             } catch (error) {
-                console.error('Error deleting business:', error);
+                console.error('İşletme silinirken hata oluştu:', error);
             }
         }
     };
@@ -120,29 +124,39 @@ const Businesses = () => {
             await businessService.approveBusiness(id);
             fetchBusinesses();
         } catch (error) {
-            console.error('Error approving business:', error);
+            console.error('İşletme onaylanırken hata oluştu:', error);
         }
     };
 
     return (
-        <Container maxWidth="lg" sx={{ mt: 4 }}>
+        <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-                <Typography variant="h4">Businesses</Typography>
-                <Button variant="contained" color="primary" onClick={() => handleOpen()}>
-                    Add Business
-                </Button>
+                <Typography variant="h4" component="h1">
+                    İşletmeler
+                </Typography>
+                {user?.role === UserRole.SUPER_ADMIN && (
+                    <Button
+                        variant="contained"
+                        color="primary"
+                        startIcon={<AddIcon />}
+                        onClick={() => handleOpen()}
+                    >
+                        Yeni İşletme
+                    </Button>
+                )}
             </Box>
 
             <TableContainer component={Paper}>
                 <Table>
                     <TableHead>
                         <TableRow>
-                            <TableCell>Name</TableCell>
-                            <TableCell>Email</TableCell>
-                            <TableCell>Phone</TableCell>
-                            <TableCell>Status</TableCell>
-                            <TableCell>Approved By</TableCell>
-                            <TableCell>Actions</TableCell>
+                            <TableCell>İşletme Adı</TableCell>
+                            <TableCell>E-posta</TableCell>
+                            <TableCell>Telefon</TableCell>
+                            <TableCell>Durum</TableCell>
+                            <TableCell>Onay Durumu</TableCell>
+                            <TableCell>Kayıt Tarihi</TableCell>
+                            <TableCell>İşlemler</TableCell>
                         </TableRow>
                     </TableHead>
                     <TableBody>
@@ -152,36 +166,44 @@ const Businesses = () => {
                                 <TableCell>{business.email}</TableCell>
                                 <TableCell>{business.phone}</TableCell>
                                 <TableCell>
-                                    <Box display="flex" gap={1}>
-                                        <Chip
-                                            label={business.isApproved ? 'Approved' : 'Pending'}
-                                            color={business.isApproved ? 'success' : 'warning'}
-                                            size="small"
-                                        />
-                                        <Chip
-                                            label={business.isActive ? 'Active' : 'Inactive'}
-                                            color={business.isActive ? 'primary' : 'default'}
-                                            size="small"
-                                        />
-                                    </Box>
+                                    <Chip
+                                        label={business.isActive ? 'Aktif' : 'Pasif'}
+                                        color={business.isActive ? 'success' : 'default'}
+                                        size="small"
+                                    />
                                 </TableCell>
                                 <TableCell>
-                                    {business.approvedBy ? business.approvedBy.name : '-'}
+                                    <Chip
+                                        label={business.isApproved ? 'Onaylı' : 'Beklemede'}
+                                        color={business.isApproved ? 'primary' : 'warning'}
+                                        size="small"
+                                    />
                                 </TableCell>
+                                <TableCell>{formatDate(business.createdAt)}</TableCell>
                                 <TableCell>
-                                    <IconButton onClick={() => handleOpen(business)} color="primary">
-                                        <EditIcon />
-                                    </IconButton>
-                                    <IconButton onClick={() => handleDelete(business._id)} color="error">
-                                        <DeleteIcon />
-                                    </IconButton>
-                                    {!business.isApproved && (
-                                        <IconButton
-                                            onClick={() => handleApprove(business._id)}
-                                            color="success"
-                                        >
-                                            <ApproveIcon />
-                                        </IconButton>
+                                    {user?.role === UserRole.SUPER_ADMIN && (
+                                        <>
+                                            <IconButton
+                                                size="small"
+                                                onClick={() => handleOpen(business)}
+                                            >
+                                                <EditIcon />
+                                            </IconButton>
+                                            <IconButton
+                                                size="small"
+                                                onClick={() => handleDelete(business._id)}
+                                            >
+                                                <DeleteIcon />
+                                            </IconButton>
+                                            {!business.isApproved && (
+                                                <IconButton
+                                                    size="small"
+                                                    onClick={() => handleApprove(business._id)}
+                                                >
+                                                    <CheckCircleIcon />
+                                                </IconButton>
+                                            )}
+                                        </>
                                     )}
                                 </TableCell>
                             </TableRow>
@@ -190,60 +212,75 @@ const Businesses = () => {
                 </Table>
             </TableContainer>
 
-            <Dialog open={open} onClose={handleClose}>
+            <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
                 <DialogTitle>
-                    {selectedBusiness ? 'Edit Business' : 'Add Business'}
+                    {selectedBusiness ? 'İşletme Düzenle' : 'Yeni İşletme'}
                 </DialogTitle>
-                <DialogContent>
-                    <TextField
-                        margin="dense"
-                        label="Name"
-                        fullWidth
-                        value={formData.name}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    />
-                    <TextField
-                        margin="dense"
-                        label="Address"
-                        fullWidth
-                        multiline
-                        rows={2}
-                        value={formData.address}
-                        onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                    />
-                    <TextField
-                        margin="dense"
-                        label="Phone"
-                        fullWidth
-                        value={formData.phone}
-                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    />
-                    <TextField
-                        margin="dense"
-                        label="Email"
-                        type="email"
-                        fullWidth
-                        value={formData.email}
-                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    />
-                    <TextField
-                        margin="dense"
-                        label="Description"
-                        fullWidth
-                        multiline
-                        rows={3}
-                        value={formData.description}
-                        onChange={(e) =>
-                            setFormData({ ...formData, description: e.target.value })
-                        }
-                    />
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={handleClose}>Cancel</Button>
-                    <Button onClick={handleSubmit} variant="contained" color="primary">
-                        {selectedBusiness ? 'Update' : 'Create'}
-                    </Button>
-                </DialogActions>
+                <form onSubmit={handleSubmit}>
+                    <DialogContent>
+                        <TextField
+                            fullWidth
+                            label="İşletme Adı"
+                            value={formData.name}
+                            onChange={(e) =>
+                                setFormData({ ...formData, name: e.target.value })
+                            }
+                            margin="normal"
+                            required
+                        />
+                        <TextField
+                            fullWidth
+                            label="Adres"
+                            value={formData.address}
+                            onChange={(e) =>
+                                setFormData({ ...formData, address: e.target.value })
+                            }
+                            margin="normal"
+                            required
+                            multiline
+                            rows={3}
+                        />
+                        <TextField
+                            fullWidth
+                            label="Telefon"
+                            value={formData.phone}
+                            onChange={(e) =>
+                                setFormData({ ...formData, phone: e.target.value })
+                            }
+                            margin="normal"
+                            required
+                        />
+                        <TextField
+                            fullWidth
+                            label="E-posta"
+                            value={formData.email}
+                            onChange={(e) =>
+                                setFormData({ ...formData, email: e.target.value })
+                            }
+                            margin="normal"
+                            required
+                            type="email"
+                        />
+                        <TextField
+                            fullWidth
+                            label="Açıklama"
+                            value={formData.description}
+                            onChange={(e) =>
+                                setFormData({ ...formData, description: e.target.value })
+                            }
+                            margin="normal"
+                            required
+                            multiline
+                            rows={4}
+                        />
+                    </DialogContent>
+                    <DialogActions>
+                        <Button onClick={handleClose}>İptal</Button>
+                        <Button type="submit" variant="contained" color="primary">
+                            {selectedBusiness ? 'Güncelle' : 'Oluştur'}
+                        </Button>
+                    </DialogActions>
+                </form>
             </Dialog>
         </Container>
     );
