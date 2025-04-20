@@ -8,7 +8,10 @@ import {
     Button,
     Paper,
     Link,
+    Alert,
 } from '@mui/material';
+import authService from '../services/authService';
+import { UserRole } from '../types/UserRole';
 
 const Register: React.FC = () => {
     const navigate = useNavigate();
@@ -18,6 +21,7 @@ const Register: React.FC = () => {
         password: '',
         confirmPassword: '',
     });
+    const [error, setError] = useState<string>('');
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setFormData({
@@ -28,8 +32,25 @@ const Register: React.FC = () => {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        // TODO: Implement registration logic
-        console.log('Registration attempt:', formData);
+        setError('');
+
+        // Şifre kontrolü
+        if (formData.password !== formData.confirmPassword) {
+            setError('Şifreler eşleşmiyor');
+            return;
+        }
+
+        try {
+            await authService.register({
+                name: formData.name,
+                email: formData.email,
+                password: formData.password,
+                role: UserRole.CUSTOMER, // Varsayılan olarak CUSTOMER rolü
+            });
+            navigate('/login'); // Başarılı kayıt sonrası login sayfasına yönlendir
+        } catch (error: any) {
+            setError(error.response?.data?.message || 'Kayıt olma işlemi başarısız oldu');
+        }
     };
 
     return (
@@ -46,6 +67,11 @@ const Register: React.FC = () => {
                     <Typography component="h1" variant="h5" align="center">
                         Kayıt Ol
                     </Typography>
+                    {error && (
+                        <Alert severity="error" sx={{ mt: 2 }}>
+                            {error}
+                        </Alert>
+                    )}
                     <Box component="form" onSubmit={handleSubmit} sx={{ mt: 1 }}>
                         <TextField
                             margin="normal"

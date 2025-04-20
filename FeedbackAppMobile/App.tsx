@@ -1,11 +1,19 @@
 import React from 'react';
+import { NavigationContainer } from '@react-navigation/native';
 import { Provider as PaperProvider } from 'react-native-paper';
-import Navigation from './src/navigation';
+import { AuthProvider } from './src/contexts/AuthContext';
+import MainStack from './src/navigation/MainStack';
 
-export default function App() {
+const App = () => {
   return (
-    <PaperProvider>
-      <Navigation />
-    </PaperProvider>
+    <NavigationContainer>
+      <PaperProvider>
+        <AuthProvider>
+          <MainStack />
+        </AuthProvider>
+      </PaperProvider>
+    </NavigationContainer>
   );
-}
+};
+
+export default App;

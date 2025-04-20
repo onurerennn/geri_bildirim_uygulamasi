@@ -1,44 +1,40 @@
 import { Request, Response } from 'express';
-import { Business } from '../models/Business';
-import { UserRole } from '../types/enums';
+import Business, { IBusiness } from '../models/Business';
+import { UserRole } from '../types/UserRole';
+import { IUser } from '../models/User';
 
-// Get all businesses
+// İşletmeleri listele
 export const getBusinesses = async (req: Request, res: Response) => {
     try {
-        const businesses = await Business.find()
-            .populate('approvedBy', 'name email')
-            .sort({ createdAt: -1 });
+        const businesses = await Business.find().populate('approvedBy', 'name');
         res.json(businesses);
     } catch (error) {
-        res.status(500).json({ message: 'Error fetching businesses' });
+        res.status(500).json({ message: 'İşletmeler listelenirken bir hata oluştu.' });
     }
 };
 
-// Get single business
+// İşletme detayını getir
 export const getBusiness = async (req: Request, res: Response) => {
     try {
-        const business = await Business.findById(req.params.id)
-            .populate('approvedBy', 'name email');
-
+        const business = await Business.findById(req.params.id).populate('approvedBy', 'name');
         if (!business) {
-            return res.status(404).json({ message: 'Business not found' });
+            return res.status(404).json({ message: 'İşletme bulunamadı.' });
         }
-
         res.json(business);
     } catch (error) {
-        res.status(500).json({ message: 'Error fetching business' });
+        res.status(500).json({ message: 'İşletme getirilirken bir hata oluştu.' });
     }
 };
 
-// Create business
+// Yeni işletme oluştur
 export const createBusiness = async (req: Request, res: Response) => {
     try {
         const { name, address, phone, email, description, logo } = req.body;
 
-        // Check if business with same email exists
+        // E-posta kontrolü
         const existingBusiness = await Business.findOne({ email });
         if (existingBusiness) {
-            return res.status(400).json({ message: 'Business with this email already exists' });
+            return res.status(400).json({ message: 'Bu e-posta adresi zaten kullanımda.' });
         }
 
         const business = new Business({
@@ -48,29 +44,33 @@ export const createBusiness = async (req: Request, res: Response) => {
             email,
             description,
             logo,
+            isApproved: false,
+            isActive: true,
         });
 
         await business.save();
-        res.status(201).json(business);
+        res.status(201).json({ message: 'İşletme başarıyla oluşturuldu.', business });
     } catch (error) {
-        res.status(500).json({ message: 'Error creating business' });
+        res.status(500).json({ message: 'İşletme oluşturulurken bir hata oluştu.' });
     }
 };
 
-// Update business
+// İşletme güncelle
 export const updateBusiness = async (req: Request, res: Response) => {
     try {
         const { name, address, phone, email, description, logo, isActive } = req.body;
-        const business = await Business.findById(req.params.id);
+        const businessId = req.params.id;
 
+        const business = await Business.findById(businessId);
         if (!business) {
-            return res.status(404).json({ message: 'Business not found' });
+            return res.status(404).json({ message: 'İşletme bulunamadı.' });
         }
 
-        if (email && email !== business.email) {
+        // E-posta değişikliği varsa kontrol et
+        if (email !== business.email) {
             const existingBusiness = await Business.findOne({ email });
             if (existingBusiness) {
-                return res.status(400).json({ message: 'Business with this email already exists' });
+                return res.status(400).json({ message: 'Bu e-posta adresi zaten kullanımda.' });
             }
         }
 
@@ -79,53 +79,50 @@ export const updateBusiness = async (req: Request, res: Response) => {
         business.phone = phone || business.phone;
         business.email = email || business.email;
         business.description = description || business.description;
-        business.logo = logo || business.logo;
-        business.isActive = isActive !== undefined ? isActive : business.isActive;
+        if (logo) business.logo = logo;
+        if (isActive !== undefined) business.isActive = isActive;
 
         await business.save();
-        res.json(business);
+        res.json({ message: 'İşletme başarıyla güncellendi.', business });
     } catch (error) {
-        res.status(500).json({ message: 'Error updating business' });
+        res.status(500).json({ message: 'İşletme güncellenirken bir hata oluştu.' });
     }
 };
 
-// Delete business
+// İşletme sil
 export const deleteBusiness = async (req: Request, res: Response) => {
     try {
         const business = await Business.findById(req.params.id);
-
         if (!business) {
-            return res.status(404).json({ message: 'Business not found' });
+            return res.status(404).json({ message: 'İşletme bulunamadı.' });
         }
 
-        await business.deleteOne();
-        res.json({ message: 'Business deleted successfully' });
+        await Business.findByIdAndDelete(req.params.id);
+        res.json({ message: 'İşletme başarıyla silindi.' });
     } catch (error) {
-        res.status(500).json({ message: 'Error deleting business' });
+        res.status(500).json({ message: 'İşletme silinirken bir hata oluştu.' });
     }
 };
 
-// Approve business
+// İşletme onayla
 export const approveBusiness = async (req: Request, res: Response) => {
     try {
-        const business = await Business.findById(req.params.id);
-
-        if (!business) {
-            return res.status(404).json({ message: 'Business not found' });
+        const requestingUser = req.user as IUser;
+        if (requestingUser.role !== UserRole.SUPER_ADMIN) {
+            return res.status(403).json({ message: 'İşletme onaylama yetkiniz yok.' });
         }
 
-        // Only Super Admin can approve businesses
-        if (req.user.role !== UserRole.SUPER_ADMIN) {
-            return res.status(403).json({ message: 'Only Super Admin can approve businesses' });
+        const business = await Business.findById(req.params.id);
+        if (!business) {
+            return res.status(404).json({ message: 'İşletme bulunamadı.' });
         }
 
         business.isApproved = true;
-        business.approvedBy = req.user._id;
-        business.approvedAt = new Date();
+        business.approvedBy = requestingUser._id;
 
         await business.save();
-        res.json(business);
+        res.json({ message: 'İşletme başarıyla onaylandı.', business });
     } catch (error) {
-        res.status(500).json({ message: 'Error approving business' });
+        res.status(500).json({ message: 'İşletme onaylanırken bir hata oluştu.' });
     }
 }; 

@@ -26,6 +26,7 @@ import {
 } from '@mui/material';
 import { Edit as EditIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import userService, { User, CreateUserData, UpdateUserData } from '../services/userService';
+import { UserRole } from '../types/UserRole';
 
 const Users: React.FC = () => {
     const [users, setUsers] = useState<User[]>([]);
@@ -35,7 +36,7 @@ const Users: React.FC = () => {
         name: '',
         email: '',
         password: '',
-        role: 'CUSTOMER',
+        role: UserRole.CUSTOMER,
     });
 
     useEffect(() => {
@@ -65,7 +66,7 @@ const Users: React.FC = () => {
                 name: '',
                 email: '',
                 password: '',
-                role: 'CUSTOMER',
+                role: UserRole.CUSTOMER,
             });
         }
         setOpen(true);
@@ -78,7 +79,7 @@ const Users: React.FC = () => {
             name: '',
             email: '',
             password: '',
-            role: 'CUSTOMER',
+            role: UserRole.CUSTOMER,
         });
     };
 
@@ -107,13 +108,13 @@ const Users: React.FC = () => {
         }
     };
 
-    const getRoleColor = (role: string) => {
+    const getRoleColor = (role: UserRole) => {
         switch (role) {
-            case 'SUPER_ADMIN':
+            case UserRole.SUPER_ADMIN:
                 return '#f44336';
-            case 'BUSINESS_ADMIN':
+            case UserRole.BUSINESS_ADMIN:
                 return '#2196f3';
-            case 'CUSTOMER':
+            case UserRole.CUSTOMER:
                 return '#4caf50';
             default:
                 return 'inherit';
@@ -239,13 +240,13 @@ const Users: React.FC = () => {
                                     onChange={(e) =>
                                         setFormData({
                                             ...formData,
-                                            role: e.target.value as User['role'],
+                                            role: e.target.value as UserRole,
                                         })
                                     }
                                 >
-                                    <MenuItem value="SUPER_ADMIN">Süper Admin</MenuItem>
-                                    <MenuItem value="BUSINESS_ADMIN">İşletme Admin</MenuItem>
-                                    <MenuItem value="CUSTOMER">Müşteri</MenuItem>
+                                    <MenuItem value={UserRole.SUPER_ADMIN}>Süper Admin</MenuItem>
+                                    <MenuItem value={UserRole.BUSINESS_ADMIN}>İşletme Admin</MenuItem>
+                                    <MenuItem value={UserRole.CUSTOMER}>Müşteri</MenuItem>
                                 </Select>
                             </FormControl>
                         </Stack>

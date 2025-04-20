@@ -1,5 +1,6 @@
 import api from './api';
 import { User } from './userService';
+import { UserRole } from '../types/UserRole';
 
 export interface LoginCredentials {
     email: string;
@@ -8,7 +9,7 @@ export interface LoginCredentials {
 
 export interface RegisterData extends LoginCredentials {
     name: string;
-    role: 'BUSINESS_ADMIN' | 'CUSTOMER';
+    role: UserRole.BUSINESS_ADMIN | UserRole.CUSTOMER;
     businessId?: string;
 }
 
