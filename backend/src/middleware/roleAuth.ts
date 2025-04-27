@@ -1,17 +1,32 @@
 import { Request, Response, NextFunction } from 'express';
-import { UserRole } from '../types/enums';
+import { UserRole } from '../types/UserRole';
 
 export const checkRole = (roles: UserRole[]) => {
     return (req: Request, res: Response, next: NextFunction) => {
-        if (!req.user) {
-            return res.status(401).json({ message: 'Unauthorized' });
-        }
+        try {
+            console.log('Role check for user:', {
+                userRole: req.user?.role,
+                requiredRoles: roles,
+                user: req.user
+            });
 
-        if (!roles.includes(req.user.role)) {
-            return res.status(403).json({ message: 'Forbidden: Insufficient permissions' });
-        }
+            if (!req.user) {
+                return res.status(401).json({ message: 'Unauthorized' });
+            }
 
-        next();
+            if (!roles.includes(req.user.role)) {
+                return res.status(403).json({
+                    message: 'Forbidden: Insufficient permissions',
+                    userRole: req.user.role,
+                    requiredRoles: roles
+                });
+            }
+
+            next();
+        } catch (error) {
+            console.error('Role check error:', error);
+            return res.status(500).json({ message: 'Internal server error during role check' });
+        }
     };
 };
 

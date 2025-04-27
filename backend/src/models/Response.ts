@@ -1,52 +1,60 @@
-import mongoose from 'mongoose';
+import mongoose, { Schema, Document, ObjectId } from 'mongoose';
 
 export interface IAnswer {
-    questionId: string;
+    question: ObjectId;
     value: string | number;
 }
 
-export interface IResponse extends mongoose.Document {
-    surveyId: mongoose.Types.ObjectId;
-    userId: mongoose.Types.ObjectId;
+export interface IResponse extends Document {
+    survey: ObjectId;
     answers: IAnswer[];
-    sentiment?: {
-        score: number;
-        magnitude: number;
-        labels: string[];
-    };
+    customer?: ObjectId;
+    business: ObjectId;
     createdAt: Date;
+    updatedAt: Date;
 }
 
-const answerSchema = new mongoose.Schema({
-    questionId: {
-        type: String,
-        required: true,
+const AnswerSchema = new Schema({
+    question: {
+        type: Schema.Types.ObjectId,
+        ref: 'Survey.questions',
+        required: true
     },
     value: {
-        type: mongoose.Schema.Types.Mixed,
-        required: true,
-    },
+        type: Schema.Types.Mixed,
+        required: true
+    }
 });
 
-const responseSchema = new mongoose.Schema({
-    surveyId: {
-        type: mongoose.Schema.Types.ObjectId,
+const ResponseSchema = new Schema({
+    survey: {
+        type: Schema.Types.ObjectId,
         ref: 'Survey',
-        required: true,
+        required: true
     },
-    userId: {
-        type: mongoose.Schema.Types.ObjectId,
+    answers: {
+        type: [AnswerSchema],
+        required: true,
+        validate: {
+            validator: function (answers: IAnswer[]) {
+                return answers.length > 0;
+            },
+            message: 'A response must have at least one answer'
+        }
+    },
+    customer: {
+        type: Schema.Types.ObjectId,
         ref: 'User',
-        required: true,
+        required: false
     },
-    answers: [answerSchema],
-    sentiment: {
-        score: Number,
-        magnitude: Number,
-        labels: [String],
-    },
-}, {
-    timestamps: true,
-});
+    business: {
+        type: Schema.Types.ObjectId,
+        ref: 'Business',
+        required: true
+    }
+}, { timestamps: true });
 
-export const Response = mongoose.model<IResponse>('Response', responseSchema); 
+// Yanıtların benzersiz olmasını sağla (bir kullanıcı bir ankete bir kez yanıt verebilir)
+ResponseSchema.index({ survey: 1, customer: 1 }, { unique: true, sparse: true });
+
+export default mongoose.model<IResponse>('Response', ResponseSchema); 

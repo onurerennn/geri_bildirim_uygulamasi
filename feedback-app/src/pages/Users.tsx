@@ -23,20 +23,30 @@ import {
     IconButton,
     Chip,
     Box,
+    Alert,
+    CircularProgress
 } from '@mui/material';
 import { Edit as EditIcon, Delete as DeleteIcon } from '@mui/icons-material';
-import userService, { User, CreateUserData, UpdateUserData } from '../services/userService';
+import { userService, CreateUserData, UpdateUserData, UserListResponse } from '../services/userService';
+import { User } from '../types/User';
 import { UserRole } from '../types/UserRole';
+
+type FormDataBase = Omit<CreateUserData, 'password'>;
+interface FormData extends FormDataBase {
+    password?: string;
+}
 
 const Users: React.FC = () => {
     const [users, setUsers] = useState<User[]>([]);
-    const [open, setOpen] = useState(false);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    const [dialogOpen, setDialogOpen] = useState(false);
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
-    const [formData, setFormData] = useState<CreateUserData | UpdateUserData>({
+    const [formData, setFormData] = useState<FormData>({
         name: '',
         email: '',
         password: '',
-        role: UserRole.CUSTOMER,
+        role: UserRole.CUSTOMER
     });
 
     useEffect(() => {
@@ -45,10 +55,22 @@ const Users: React.FC = () => {
 
     const fetchUsers = async () => {
         try {
+            setLoading(true);
             const data = await userService.getUsers();
-            setUsers(data);
+
+            // Handle both response types
+            if (Array.isArray(data)) {
+                setUsers(data);
+            } else {
+                // It's a UserListResponse
+                setUsers(data.users);
+            }
+
+            setLoading(false);
         } catch (error) {
             console.error('Error fetching users:', error);
+            setError('Failed to fetch users. Please try again later.');
+            setLoading(false);
         }
     };
 
@@ -69,11 +91,11 @@ const Users: React.FC = () => {
                 role: UserRole.CUSTOMER,
             });
         }
-        setOpen(true);
+        setDialogOpen(true);
     };
 
     const handleClose = () => {
-        setOpen(false);
+        setDialogOpen(false);
         setSelectedUser(null);
         setFormData({
             name: '',
@@ -194,7 +216,7 @@ const Users: React.FC = () => {
                 </Table>
             </TableContainer>
 
-            <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+            <Dialog open={dialogOpen} onClose={handleClose} maxWidth="sm" fullWidth>
                 <DialogTitle>
                     {selectedUser ? 'Kullanıcı Düzenle' : 'Yeni Kullanıcı'}
                 </DialogTitle>

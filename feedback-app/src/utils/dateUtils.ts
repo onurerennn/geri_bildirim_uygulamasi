@@ -1,10 +1,10 @@
-export function formatDate(dateString: string): string {
-    const date = new Date(dateString);
-    return new Intl.DateTimeFormat('tr-TR', {
-        day: '2-digit',
-        month: '2-digit',
+export const formatDate = (date: string | Date): string => {
+    const d = typeof date === 'string' ? new Date(date) : date;
+    return d.toLocaleDateString('tr-TR', {
         year: 'numeric',
+        month: 'long',
+        day: 'numeric',
         hour: '2-digit',
         minute: '2-digit'
-    }).format(date);
-} 
+    });
+}; 

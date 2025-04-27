@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import bcrypt from 'bcryptjs';
+import * as bcrypt from 'bcryptjs';
 import User, { IUser } from '../models/User';
 import { UserRole } from '../types/UserRole';
 

@@ -1,22 +1,25 @@
 import express from 'express';
-import * as userController from '../controllers/userController';
-import { checkRole, isAdminOrSuperAdmin } from '../middleware/roleAuth';
+import {
+    getUsers,
+    getUser,
+    createUser,
+    updateUser,
+    deleteUser,
+} from '../controllers/userController';
+import { protect } from '../middleware/auth';
+import { checkRole } from '../middleware/roleAuth';
+import { UserRole } from '../types/UserRole';
 
 const router = express.Router();
 
-// Get all users (Super Admin and Business Admin only)
-router.get('/', isAdminOrSuperAdmin, userController.getUsers);
+// Tüm rotalar için authentication gerekli
+router.use(protect);
 
-// Get single user by ID (Super Admin and Business Admin only)
-router.get('/:id', isAdminOrSuperAdmin, userController.getUser);
-
-// Create new user (Super Admin can create any role, Business Admin can only create customers)
-router.post('/', isAdminOrSuperAdmin, userController.createUser);
-
-// Update user (Super Admin can update any user, Business Admin can only update customers)
-router.put('/:id', isAdminOrSuperAdmin, userController.updateUser);
-
-// Delete user (Super Admin can delete any user except themselves, Business Admin can only delete customers)
-router.delete('/:id', isAdminOrSuperAdmin, userController.deleteUser);
+// Admin ve Super Admin rotaları
+router.get('/', checkRole([UserRole.SUPER_ADMIN]), getUsers);
+router.get('/:id', checkRole([UserRole.SUPER_ADMIN, UserRole.BUSINESS_ADMIN]), getUser);
+router.post('/', checkRole([UserRole.SUPER_ADMIN]), createUser);
+router.put('/:id', checkRole([UserRole.SUPER_ADMIN]), updateUser);
+router.delete('/:id', checkRole([UserRole.SUPER_ADMIN]), deleteUser);
 
 export default router; 

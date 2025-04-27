@@ -1,5 +1,6 @@
 // Configuration constants
-export const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+// Using a relative URL will leverage the proxy setting in package.json
+export const API_URL = '/api'; // Add /api prefix to all requests
 
 // Application information
 export const APP_NAME = 'Geri Bildirim';

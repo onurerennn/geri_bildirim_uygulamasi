@@ -6,32 +6,27 @@ import {
     updateBusiness,
     deleteBusiness,
     approveBusiness,
+    addBusinessAdmin,
+    createDefaultBusiness
 } from '../controllers/businessController';
-import { authenticate } from '../middleware/authMiddleware';
-import { authorize } from '../middleware/roleMiddleware';
+import { protect, authorize } from '../middleware/authMiddleware';
+import { checkRole } from '../middleware/roleAuth';
 import { UserRole } from '../types/UserRole';
 
 const router = express.Router();
 
-// Tüm rotalar için authentication gerekli
-router.use(authenticate);
+// Public routes (for development only)
+router.post('/create-default', createDefaultBusiness);
 
-// İşletmeleri listele
-router.get('/', authorize([UserRole.SUPER_ADMIN, UserRole.BUSINESS_ADMIN]), getBusinesses);
+// Protected routes
+router.get('/', protect, authorize([UserRole.SUPER_ADMIN]), getBusinesses);
+router.post('/', protect, authorize([UserRole.SUPER_ADMIN]), createBusiness);
+router.post('/:id/approve', protect, authorize([UserRole.SUPER_ADMIN]), approveBusiness);
+router.post('/:id/admin', protect, authorize([UserRole.SUPER_ADMIN]), addBusinessAdmin);
+router.put('/:id', protect, authorize([UserRole.SUPER_ADMIN, UserRole.BUSINESS_ADMIN]), updateBusiness);
+router.delete('/:id', protect, authorize([UserRole.SUPER_ADMIN]), deleteBusiness);
 
-// İşletme detayı getir
-router.get('/:id', authorize([UserRole.SUPER_ADMIN, UserRole.BUSINESS_ADMIN]), getBusiness);
-
-// Yeni işletme oluştur
-router.post('/', authorize([UserRole.SUPER_ADMIN]), createBusiness);
-
-// İşletme güncelle
-router.put('/:id', authorize([UserRole.SUPER_ADMIN]), updateBusiness);
-
-// İşletme sil
-router.delete('/:id', authorize([UserRole.SUPER_ADMIN]), deleteBusiness);
-
-// İşletme onayla
-router.post('/:id/approve', authorize([UserRole.SUPER_ADMIN]), approveBusiness);
+// BUSINESS_ADMIN ve SUPER_ADMIN rotaları
+router.get('/:id', protect, authorize([UserRole.SUPER_ADMIN, UserRole.BUSINESS_ADMIN]), getBusiness);
 
 export default router; 

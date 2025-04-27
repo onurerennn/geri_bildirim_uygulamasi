@@ -1,12 +1,11 @@
 {
   "expo": {
-    "name": "Feedback App",
-    "slug": "feedback-app-mobile",
+    "name": "FeedbackAppMobile",
+    "slug": "feedbackappmobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
@@ -17,17 +16,27 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "jsEngine": "hermes"
+      "jsEngine": "hermes",
+      "bundleIdentifier": "com.feedbackappmobile"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
+      "permissions": [
+        "android.permission.DETECT_SCREEN_CAPTURE",
+        "android.permission.INTERNET"
+      ],
+      "package": "com.feedbackappmobile",
       "jsEngine": "hermes"
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "apiUrl": "http://localhost:5000/api"
     }
-  }
+  },
+  "note": "Bu dosya artık kullanılmıyor, app.config.js dosyasına bakın"
 }

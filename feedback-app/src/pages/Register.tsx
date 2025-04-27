@@ -9,12 +9,14 @@ import {
     Paper,
     Link,
     Alert,
+    CircularProgress,
 } from '@mui/material';
 import authService from '../services/authService';
 import { UserRole } from '../types/UserRole';
 
 const Register: React.FC = () => {
     const navigate = useNavigate();
+    const [loading, setLoading] = useState(false);
     const [formData, setFormData] = useState({
         name: '',
         email: '',
@@ -22,34 +24,106 @@ const Register: React.FC = () => {
         confirmPassword: '',
     });
     const [error, setError] = useState<string>('');
+    const [fieldErrors, setFieldErrors] = useState({
+        name: '',
+        email: '',
+        password: '',
+        confirmPassword: '',
+    });
+
+    const validateForm = () => {
+        let isValid = true;
+        const errors = {
+            name: '',
+            email: '',
+            password: '',
+            confirmPassword: '',
+        };
+
+        // Ad kontrolü
+        if (!formData.name.trim()) {
+            errors.name = 'Ad Soyad alanı zorunludur';
+            isValid = false;
+        }
+
+        // E-posta kontrolü
+        if (!formData.email) {
+            errors.email = 'E-posta alanı zorunludur';
+            isValid = false;
+        } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+            errors.email = 'Geçerli bir e-posta adresi giriniz';
+            isValid = false;
+        }
+
+        // Şifre kontrolü
+        if (!formData.password) {
+            errors.password = 'Şifre alanı zorunludur';
+            isValid = false;
+        } else if (formData.password.length < 6) {
+            errors.password = 'Şifre en az 6 karakter olmalıdır';
+            isValid = false;
+        }
+
+        // Şifre tekrar kontrolü
+        if (!formData.confirmPassword) {
+            errors.confirmPassword = 'Şifre tekrar alanı zorunludur';
+            isValid = false;
+        } else if (formData.password !== formData.confirmPassword) {
+            errors.confirmPassword = 'Şifreler eşleşmiyor';
+            isValid = false;
+        }
+
+        setFieldErrors(errors);
+        return isValid;
+    };
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setFormData({
-            ...formData,
-            [e.target.name]: e.target.value,
-        });
+        const { name, value } = e.target;
+        setFormData(prev => ({
+            ...prev,
+            [name]: value,
+        }));
+        // Kullanıcı yazmaya başladığında hata mesajını temizle
+        setFieldErrors(prev => ({
+            ...prev,
+            [name]: '',
+        }));
+        setError('');
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setError('');
 
-        // Şifre kontrolü
-        if (formData.password !== formData.confirmPassword) {
-            setError('Şifreler eşleşmiyor');
+        if (!validateForm()) {
             return;
         }
 
+        setLoading(true);
+        setError('');
+
         try {
-            await authService.register({
-                name: formData.name,
-                email: formData.email,
+            const { token, user } = await authService.register({
+                name: formData.name.trim(),
+                email: formData.email.trim().toLowerCase(),
                 password: formData.password,
-                role: UserRole.CUSTOMER, // Varsayılan olarak CUSTOMER rolü
+                role: UserRole.CUSTOMER,
             });
-            navigate('/login'); // Başarılı kayıt sonrası login sayfasına yönlendir
+
+            // Başarılı kayıt sonrası
+            console.log('Kayıt başarılı:', { token, user });
+            navigate('/login', {
+                state: {
+                    message: 'Kayıt işleminiz başarıyla tamamlandı! Şimdi e-posta ve şifrenizle giriş yapabilirsiniz.'
+                }
+            });
         } catch (error: any) {
-            setError(error.response?.data?.message || 'Kayıt olma işlemi başarısız oldu');
+            console.error('Kayıt hatası:', error);
+            setError(
+                error.response?.data?.message ||
+                'Kayıt olma işlemi başarısız oldu. Lütfen tekrar deneyin.'
+            );
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -84,6 +158,9 @@ const Register: React.FC = () => {
                             autoFocus
                             value={formData.name}
                             onChange={handleChange}
+                            error={!!fieldErrors.name}
+                            helperText={fieldErrors.name}
+                            disabled={loading}
                         />
                         <TextField
                             margin="normal"
@@ -95,6 +172,9 @@ const Register: React.FC = () => {
                             autoComplete="email"
                             value={formData.email}
                             onChange={handleChange}
+                            error={!!fieldErrors.email}
+                            helperText={fieldErrors.email}
+                            disabled={loading}
                         />
                         <TextField
                             margin="normal"
@@ -106,6 +186,9 @@ const Register: React.FC = () => {
                             id="password"
                             value={formData.password}
                             onChange={handleChange}
+                            error={!!fieldErrors.password}
+                            helperText={fieldErrors.password}
+                            disabled={loading}
                         />
                         <TextField
                             margin="normal"
@@ -117,20 +200,34 @@ const Register: React.FC = () => {
                             id="confirmPassword"
                             value={formData.confirmPassword}
                             onChange={handleChange}
+                            error={!!fieldErrors.confirmPassword}
+                            helperText={fieldErrors.confirmPassword}
+                            disabled={loading}
                         />
                         <Button
                             type="submit"
                             fullWidth
                             variant="contained"
-                            sx={{ mt: 3, mb: 2 }}
+                            sx={{ mt: 3, mb: 2, height: 48 }}
+                            disabled={loading}
                         >
-                            Kayıt Ol
+                            {loading ? (
+                                <CircularProgress size={24} color="inherit" />
+                            ) : (
+                                'Kayıt Ol'
+                            )}
                         </Button>
                         <Box sx={{ textAlign: 'center' }}>
                             <Link
-                                component="button"
+                                href="/login"
                                 variant="body2"
-                                onClick={() => navigate('/login')}
+                                sx={{
+                                    cursor: 'pointer',
+                                    textDecoration: 'none',
+                                    '&:hover': {
+                                        textDecoration: 'underline'
+                                    }
+                                }}
                             >
                                 Zaten hesabınız var mı? Giriş yapın
                             </Link>
