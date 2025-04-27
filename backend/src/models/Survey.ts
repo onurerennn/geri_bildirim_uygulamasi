@@ -1,69 +1,62 @@
-import mongoose from 'mongoose';
+import mongoose, { Schema, Document, ObjectId } from 'mongoose';
 
 export interface IQuestion {
-    type: 'multiple_choice' | 'rating' | 'text';
     text: string;
+    type: 'rating' | 'text' | 'multiple_choice';
     options?: string[];
     required: boolean;
 }
 
-export interface ISurvey extends mongoose.Document {
-    businessId: mongoose.Types.ObjectId;
+export interface ISurvey extends Document {
     title: string;
+    description: string;
     questions: IQuestion[];
-    startDate: Date;
-    endDate: Date;
-    status: 'active' | 'inactive';
+    business: ObjectId;
+    isActive: boolean;
+    startDate?: Date;
+    endDate?: Date;
+    createdBy: mongoose.Types.ObjectId;
     createdAt: Date;
     updatedAt: Date;
 }
 
-const questionSchema = new mongoose.Schema({
+const QuestionSchema = new Schema({
+    text: { type: String, required: true },
     type: {
         type: String,
-        enum: ['multiple_choice', 'rating', 'text'],
         required: true,
+        enum: ['rating', 'text', 'multiple_choice']
     },
-    text: {
-        type: String,
-        required: true,
-    },
-    options: [{
-        type: String,
-    }],
-    required: {
-        type: Boolean,
-        default: true,
-    },
+    options: { type: [String], required: false },
+    required: { type: Boolean, default: true }
 });
 
-const surveySchema = new mongoose.Schema({
-    businessId: {
-        type: mongoose.Schema.Types.ObjectId,
+const SurveySchema = new Schema({
+    title: { type: String, required: true },
+    description: { type: String, required: true },
+    questions: {
+        type: [QuestionSchema],
+        required: true,
+        validate: {
+            validator: function (questions: IQuestion[]) {
+                return questions.length > 0;
+            },
+            message: 'A survey must have at least one question'
+        }
+    },
+    business: {
+        type: Schema.Types.ObjectId,
         ref: 'Business',
+        required: true
+    },
+    isActive: { type: Boolean, default: true },
+    startDate: { type: Date },
+    endDate: { type: Date },
+    createdBy: {
+        type: Schema.Types.ObjectId,
+        ref: 'User',
         required: true,
     },
-    title: {
-        type: String,
-        required: true,
-        trim: true,
-    },
-    questions: [questionSchema],
-    startDate: {
-        type: Date,
-        required: true,
-    },
-    endDate: {
-        type: Date,
-        required: true,
-    },
-    status: {
-        type: String,
-        enum: ['active', 'inactive'],
-        default: 'active',
-    },
-}, {
-    timestamps: true,
-});
+}, { timestamps: true });
 
-export const Survey = mongoose.model<ISurvey>('Survey', surveySchema); 
+export default mongoose.model<ISurvey>('Survey', SurveySchema); 

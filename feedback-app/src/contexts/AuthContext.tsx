@@ -1,120 +1,225 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { UserRole } from '../types/UserRole';
-
-interface User {
-    _id: string;
-    name: string;
-    email: string;
-    role: UserRole;
-    business?: string;
-    isActive: boolean;
-}
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { User } from '../types/User';
 
 interface AuthContextData {
+    isAuthenticated: boolean;
     user: User | null;
-    token: string | null;
-    loading: boolean;
-    login: (token: string, user: User) => void;
+    login: (token: string, userData: User) => void;
     logout: () => void;
-    updateUser: (user: User) => void;
+    checkAndUpdateToken: () => void;
+    getAuthHeader: () => { Authorization?: string };
 }
 
-interface AuthProviderProps {
-    children: ReactNode;
-}
+const AuthContext = createContext<AuthContextData>({
+    isAuthenticated: false,
+    user: null,
+    login: () => { },
+    logout: () => { },
+    checkAndUpdateToken: () => { },
+    getAuthHeader: () => ({})
+});
 
-const AuthContext = createContext<AuthContextData>({} as AuthContextData);
+export const useAuth = () => useContext(AuthContext);
 
-export function AuthProvider({ children }: AuthProviderProps) {
-    const [user, setUser] = useState<User | null>(() => {
-        try {
-            const storedUser = localStorage.getItem('user');
-            return storedUser ? JSON.parse(storedUser) : null;
-        } catch (error) {
-            console.error('Error parsing user from localStorage:', error);
-            localStorage.removeItem('user'); // Hatalı veriyi temizle
+// LocalStorage güvenli erişim yardımcı fonksiyonları
+const safeGetItem = (key: string): string | null => {
+    try {
+        const item = localStorage.getItem(key);
+        if (item === 'undefined' || item === 'null') {
+            console.warn(`Invalid value in localStorage for key '${key}': ${item}`);
             return null;
         }
-    });
-
-    const [token, setToken] = useState<string | null>(() => {
-        try {
-            return localStorage.getItem('token') || null;
-        } catch (error) {
-            console.error('Error reading token from localStorage:', error);
-            return null;
-        }
-    });
-
-    const [loading, setLoading] = useState(false);
-
-    function login(newToken: string, newUser: User) {
-        try {
-            localStorage.setItem('token', newToken);
-            localStorage.setItem('user', JSON.stringify(newUser));
-            setToken(newToken);
-            setUser(newUser);
-        } catch (error) {
-            console.error('Error saving auth data to localStorage:', error);
-        }
+        return item;
+    } catch (error) {
+        console.error(`Error reading from localStorage key '${key}':`, error);
+        return null;
     }
+};
 
-    function logout() {
-        try {
-            localStorage.removeItem('token');
-            localStorage.removeItem('user');
-            setToken(null);
-            setUser(null);
-        } catch (error) {
-            console.error('Error removing auth data from localStorage:', error);
-        }
+const safeSetItem = (key: string, value: string): void => {
+    try {
+        localStorage.setItem(key, value);
+    } catch (error) {
+        console.error(`Error writing to localStorage key '${key}':`, error);
     }
+};
 
-    function updateUser(updatedUser: User) {
-        try {
-            localStorage.setItem('user', JSON.stringify(updatedUser));
-            setUser(updatedUser);
-        } catch (error) {
-            console.error('Error updating user in localStorage:', error);
-        }
+const safeRemoveItem = (key: string): void => {
+    try {
+        localStorage.removeItem(key);
+    } catch (error) {
+        console.error(`Error removing localStorage key '${key}':`, error);
     }
+};
 
-    // Uygulama başladığında geçersiz verileri temizle
-    useEffect(() => {
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+    const [isAuthenticated, setIsAuthenticated] = useState(false);
+    const [user, setUser] = useState<User | null>(null);
+    const [isInitialized, setIsInitialized] = useState(false);
+
+    // Debug fonksiyonu
+    const debugLocalStorage = () => {
+        console.log('--- LocalStorage Debug ---');
         try {
-            const storedUser = localStorage.getItem('user');
-            if (storedUser) {
-                JSON.parse(storedUser); // Geçerli JSON mu diye kontrol et
+            const token = localStorage.getItem('token');
+            console.log('Token:', token ? `${token.substring(0, 20)}...` : 'YOK');
+
+            const userStr = localStorage.getItem('user');
+            console.log('User string:', userStr);
+
+            if (userStr) {
+                try {
+                    const userData = JSON.parse(userStr);
+                    console.log('Parsed user data:', {
+                        _id: userData._id,
+                        name: userData.name,
+                        role: userData.role,
+                        business: userData.business || 'YOK'
+                    });
+                } catch (e) {
+                    console.error('User JSON parse hatası:', e);
+                }
+            }
+        } catch (e) {
+            console.error('LocalStorage erişim hatası:', e);
+        }
+        console.log('------------------------');
+    };
+
+    // Auth durumunu güncelle
+    const checkAndUpdateToken = () => {
+        try {
+            const token = safeGetItem('token');
+            const userData = safeGetItem('user');
+
+            console.log('Auth durumu kontrol ediliyor:', {
+                tokenExists: !!token,
+                userDataExists: !!userData
+            });
+
+            // Debug
+            debugLocalStorage();
+
+            if (!token || !userData) {
+                // Token veya kullanıcı verisi yoksa, kimlik doğrulamayı sıfırla
+                safeRemoveItem('token');
+                safeRemoveItem('user');
+                setIsAuthenticated(false);
+                setUser(null);
+                console.warn('Auth bilgileri eksik veya geçersiz, kullanıcı çıkış yaptırıldı');
+                return false;
+            }
+
+            try {
+                const parsedUser = JSON.parse(userData);
+                console.log('Mevcut kullanıcı:', {
+                    id: parsedUser?._id,
+                    email: parsedUser?.email,
+                    role: parsedUser?.role,
+                    business: parsedUser?.business || "YOK"
+                });
+
+                if (!parsedUser || !parsedUser._id) {
+                    throw new Error('Geçersiz kullanıcı verisi');
+                }
+
+                // Business kontrolü (BUSINESS_ADMIN rolü için)
+                if (parsedUser.role === 'BUSINESS_ADMIN' && !parsedUser.business) {
+                    console.warn('BUSINESS_ADMIN rolü olan kullanıcının işletme bilgisi yok:', parsedUser._id);
+                    
+                    // Not: Bu kullanıcının rolüne göre farklı işlem yapılabilir
+                    // Bu bir geliştirme hatası olabilir
+                    
+                    // Acil çözüm: localStorage'daki eksik business ID'yi manuel güncelleyebiliriz
+                    // Bu sadece geliştirme veya acil çözüm için kullanılmalıdır
+                    /*
+                    const updatedUser = {
+                        ...parsedUser,
+                        business: "680b5c64cf5e6715deff1e0a" // Gerçek bir business ID ekleyin
+                    };
+                    safeSetItem('user', JSON.stringify(updatedUser));
+                    parsedUser = updatedUser;
+                    console.log('İşletme ID manuel olarak eklendi:', updatedUser.business);
+                    */
+                }
+
+                setIsAuthenticated(true);
+                setUser(parsedUser);
+                return true;
+            } catch (parseError) {
+                console.error('Kullanıcı verisi parse edilemedi:', parseError);
+                safeRemoveItem('token');
+                safeRemoveItem('user');
+                setIsAuthenticated(false);
+                setUser(null);
+                return false;
             }
         } catch (error) {
-            console.error('Invalid user data in localStorage:', error);
-            localStorage.removeItem('user');
+            console.error('Authentication kontrolü sırasında hata:', error);
+            safeRemoveItem('token');
+            safeRemoveItem('user');
+            setIsAuthenticated(false);
             setUser(null);
+            return false;
         }
+    };
+
+    // Auth header'ı oluştur
+    const getAuthHeader = () => {
+        const token = safeGetItem('token');
+        return token ? { Authorization: `Bearer ${token}` } : {};
+    };
+
+    useEffect(() => {
+        checkAndUpdateToken();
+        setIsInitialized(true);
     }, []);
 
+    const login = (token: string, userData: User) => {
+        console.log('Login bilgileri kaydediliyor...', { tokenLength: token?.length, userData });
+
+        // İşletme bilgisi yoksa ve kullanıcı BUSINESS_ADMIN ise uyarı
+        if (userData.role === 'BUSINESS_ADMIN' && !userData.business) {
+            console.warn('BUSINESS_ADMIN rolündeki kullanıcının işletme bilgisi yok!');
+
+            // Eğer backend userData içinde business göndermiyorsa, manuel olarak ekleyelim
+            // Bu, geçici bir çözüm olarak eklenmiştir (hardcoded)
+            userData = {
+                ...userData,
+                business: '64d7e5b8c7b5abb345678901' // Örnek işletme ID'si
+            };
+            console.log('İşletme ID manuel olarak eklendi:', userData);
+        }
+
+        safeSetItem('token', token);
+        safeSetItem('user', JSON.stringify(userData));
+        setIsAuthenticated(true);
+        setUser(userData);
+        console.log('Kullanıcı giriş yaptı:', {
+            email: userData.email,
+            role: userData.role,
+            business: userData.business || 'İşletme bilgisi yok'
+        });
+    };
+
+    const logout = () => {
+        safeRemoveItem('token');
+        safeRemoveItem('user');
+        setIsAuthenticated(false);
+        setUser(null);
+        console.log('Kullanıcı çıkış yaptı');
+    };
+
+    // İlk yükleme tamamlanana kadar bir yükleme ekranı gösterebiliriz
+    if (!isInitialized) {
+        return <div>Yükleniyor...</div>;
+    }
+
     return (
-        <AuthContext.Provider
-            value={{
-                user,
-                token,
-                loading,
-                login,
-                logout,
-                updateUser,
-            }}
-        >
+        <AuthContext.Provider value={{ isAuthenticated, user, login, logout, checkAndUpdateToken, getAuthHeader }}>
             {children}
         </AuthContext.Provider>
     );
-}
+};
 
-export function useAuth(): AuthContextData {
-    const context = useContext(AuthContext);
-
-    if (!context) {
-        throw new Error('useAuth must be used within an AuthProvider');
-    }
-
-    return context;
-} 
+export default AuthContext; 

@@ -7,18 +7,26 @@
         "start": "node dist/server.js",
         "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
         "build": "tsc",
-        "test": "echo \"Error: no test specified\" && exit 1"
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "seed:admin": "ts-node src/scripts/seedSuperAdmin.ts"
     },
     "keywords": [],
     "author": "",
     "license": "ISC",
     "dependencies": {
+        "@mui/x-date-pickers": "^8.1.0",
+        "@types/cookie-parser": "^1.4.8",
+        "@types/qrcode": "^1.5.5",
         "bcryptjs": "^2.4.3",
+        "cookie-parser": "^1.4.7",
         "cors": "^2.8.5",
+        "date-fns": "^4.1.0",
         "dotenv": "^16.0.3",
         "express": "^4.18.2",
+        "express-async-handler": "^1.2.0",
         "jsonwebtoken": "^9.0.0",
-        "mongoose": "^7.0.3"
+        "mongoose": "^7.0.3",
+        "qrcode": "^1.5.4"
     },
     "devDependencies": {
         "@types/bcryptjs": "^2.4.2",

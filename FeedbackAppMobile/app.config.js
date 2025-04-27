@@ -1,6 +1,6 @@
 export default {
     name: 'FeedbackAppMobile',
-    slug: 'FeedbackAppMobile',
+    slug: 'feedbackappmobile',
     version: '1.0.0',
     orientation: 'portrait',
     icon: './assets/icon.png',
@@ -14,13 +14,21 @@ export default {
         '**/*'
     ],
     ios: {
-        supportsTablet: true
+        supportsTablet: true,
+        jsEngine: 'hermes',
+        bundleIdentifier: 'com.feedbackappmobile'
     },
     android: {
         adaptiveIcon: {
             foregroundImage: './assets/adaptive-icon.png',
             backgroundColor: '#ffffff'
-        }
+        },
+        permissions: [
+            "android.permission.DETECT_SCREEN_CAPTURE",
+            "android.permission.INTERNET"
+        ],
+        package: "com.feedbackappmobile",
+        jsEngine: "hermes"
     },
     web: {
         favicon: './assets/favicon.png'

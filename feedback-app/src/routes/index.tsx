@@ -13,6 +13,7 @@ import Businesses from '../pages/Businesses';
 import Surveys from '../pages/Surveys';
 import QRCodes from '../pages/QRCodes';
 import Profile from '../pages/Profile';
+import Customer from '../pages/Customer';
 
 interface ProtectedRouteProps {
     children: React.ReactNode;
@@ -36,47 +37,55 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles 
 const AppRoutes = () => {
     const { user } = useAuth();
 
-    if (!user) {
-        return (
-            <Routes>
-                <Route path="/login" element={<Login />} />
-                <Route path="/register" element={<Register />} />
-                <Route path="*" element={<Navigate to="/login" replace />} />
-            </Routes>
-        );
-    }
-
     return (
-        <Layout>
-            <Routes>
-                <Route path="/" element={<Dashboard />} />
+        <Routes>
+            <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
+            <Route path="/register" element={!user ? <Register /> : <Navigate to="/" />} />
 
-                {/* Admin Routes */}
-                <Route
-                    path="/users"
-                    element={
-                        <ProtectedRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.BUSINESS_ADMIN]}>
-                            <Users />
-                        </ProtectedRoute>
-                    }
-                />
-                <Route
-                    path="/businesses"
-                    element={
-                        <ProtectedRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.BUSINESS_ADMIN]}>
-                            <Businesses />
-                        </ProtectedRoute>
-                    }
-                />
+            <Route element={<Layout />}>
+                <Route path="/" element={
+                    <ProtectedRoute>
+                        {user?.role === UserRole.CUSTOMER ? <Customer /> : <Dashboard />}
+                    </ProtectedRoute>
+                } />
 
-                {/* Common Routes */}
-                <Route path="/surveys" element={<Surveys />} />
-                <Route path="/qr-codes" element={<QRCodes />} />
-                <Route path="/profile" element={<Profile />} />
+                <Route path="/customer" element={
+                    <ProtectedRoute allowedRoles={[UserRole.CUSTOMER]}>
+                        <Customer />
+                    </ProtectedRoute>
+                } />
 
-                <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-        </Layout>
+                <Route path="/users" element={
+                    <ProtectedRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.BUSINESS_ADMIN]}>
+                        <Users />
+                    </ProtectedRoute>
+                } />
+
+                <Route path="/businesses" element={
+                    <ProtectedRoute allowedRoles={[UserRole.SUPER_ADMIN]}>
+                        <Businesses />
+                    </ProtectedRoute>
+                } />
+
+                <Route path="/surveys" element={
+                    <ProtectedRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.BUSINESS_ADMIN]}>
+                        <Surveys />
+                    </ProtectedRoute>
+                } />
+
+                <Route path="/qrcodes" element={
+                    <ProtectedRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.BUSINESS_ADMIN]}>
+                        <QRCodes />
+                    </ProtectedRoute>
+                } />
+
+                <Route path="/profile" element={
+                    <ProtectedRoute>
+                        <Profile />
+                    </ProtectedRoute>
+                } />
+            </Route>
+        </Routes>
     );
 };
 

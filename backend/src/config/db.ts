@@ -1,14 +1,14 @@
 import mongoose from 'mongoose';
-import dotenv from 'dotenv';
 
-dotenv.config();
-
-const connectDB = async () => {
+const connectDB = async (): Promise<void> => {
     try {
-        const conn = await mongoose.connect(process.env.MONGODB_URI as string);
-        console.log(`MongoDB Connected: ${conn.connection.host}`);
+        const mongoURI = process.env.MONGO_URI || 'mongodb://localhost:27017/feedback-app';
+
+        await mongoose.connect(mongoURI);
+
+        console.log('MongoDB bağlantısı başarılı');
     } catch (error) {
-        console.error('Error connecting to MongoDB:', error);
+        console.error('MongoDB bağlantı hatası:', error);
         process.exit(1);
     }
 };

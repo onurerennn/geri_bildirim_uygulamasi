@@ -32,13 +32,19 @@ export interface Question {
 }
 
 export interface Survey {
-    id: string;
+    _id: string;
     businessId: string;
     title: string;
+    description?: string;
     questions: Question[];
     startDate: Date;
     endDate: Date;
-    status: 'active' | 'inactive';
+    status: 'active' | 'inactive' | 'draft' | 'completed';
+    isPublic: boolean;
+    qrCodes?: string[];
+    responseCount?: number;
+    createdBy?: string;
+    updatedBy?: string;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -51,14 +57,35 @@ export interface Answer {
 export interface Response {
     id: string;
     surveyId: string;
-    userId: string;
+    userId?: string;
     answers: Answer[];
     sentiment?: {
         score: number;
         magnitude: number;
         labels: string[];
     };
+    deviceInfo?: {
+        platform: string;
+        model: string;
+        version: string;
+    };
+    location?: {
+        latitude: number;
+        longitude: number;
+    };
     createdAt: Date;
+}
+
+export interface QRCode {
+    _id: string;
+    code: string;
+    surveyId: string;
+    businessId: string;
+    url: string;
+    surveyTitle?: string;
+    isActive: boolean;
+    createdAt: string;
+    updatedAt: string;
 }
 
 export type RewardType = 'survey_completion' | 'referral';

@@ -5,8 +5,9 @@ export interface IBusiness extends Document {
     address: string;
     phone: string;
     email: string;
-    description: string;
+    description?: string;
     logo?: string;
+    password: string;
     isApproved: boolean;
     isActive: boolean;
     approvedBy?: mongoose.Types.ObjectId;
@@ -35,10 +36,14 @@ const businessSchema = new Schema<IBusiness>(
         },
         description: {
             type: String,
-            required: true,
+            required: false,
         },
         logo: {
             type: String,
+        },
+        password: {
+            type: String,
+            required: true,
         },
         isApproved: {
             type: Boolean,
