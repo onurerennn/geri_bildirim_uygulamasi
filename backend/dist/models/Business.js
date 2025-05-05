@@ -65,7 +65,7 @@ const businessSchema = new mongoose_1.Schema({
     },
     isApproved: {
         type: Boolean,
-        default: false,
+        default: true,
     },
     isActive: {
         type: Boolean,

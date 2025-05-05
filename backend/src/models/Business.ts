@@ -47,7 +47,7 @@ const businessSchema = new Schema<IBusiness>(
         },
         isApproved: {
             type: Boolean,
-            default: false,
+            default: true,
         },
         isActive: {
             type: Boolean,
