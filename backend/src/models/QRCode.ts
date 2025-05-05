@@ -3,62 +3,78 @@ import { ISurvey } from './Survey';
 import { IBusiness } from './Business';
 
 export interface IQRCode extends Document {
-    code: string;
-    surveyId: mongoose.Types.ObjectId;
-    survey: mongoose.Types.ObjectId;  // Backward compatibility
-    businessId: mongoose.Types.ObjectId;
-    business: mongoose.Types.ObjectId;  // Backward compatibility
-    url: string;
-    isActive: boolean;
-    surveyTitle: string;  // Anket başlığı alanı
+    code: string;           // Manuel girilebilecek benzersiz kod
+    url: string;            // Anket URL'si
+    surveyId: mongoose.Types.ObjectId; // Anket ID'si
+    survey: mongoose.Types.ObjectId;   // Geriye dönük uyumluluk için
+    businessId: mongoose.Types.ObjectId; // İşletme ID'si
+    business: mongoose.Types.ObjectId;   // Geriye dönük uyumluluk için
     createdAt: Date;
     updatedAt: Date;
+    isActive: boolean;      // QR kodun aktif olup olmadığı
+    scanCount: number;      // Kaç kez tarandığı
+    surveyTitle: string;    // Anket başlığı (kolay referans için)
+    description: string;    // QR kodun açıklaması (ör. "Masa 1", "Giriş QR Kodu")
+    location: string;       // QR kodun konumunu belirtmek için (opsiyonel)
 }
 
-const QRCodeSchema: Schema = new Schema(
-    {
-        code: {
-            type: String,
-            required: [true, 'QR code is required'],
-            unique: true,
-        },
-        surveyId: {
-            type: Schema.Types.ObjectId,
-            ref: 'Survey',
-            required: true,
-        },
-        survey: {
-            type: Schema.Types.ObjectId,
-            ref: 'Survey',
-            required: true,
-        },
-        businessId: {
-            type: Schema.Types.ObjectId,
-            ref: 'Business',
-            required: true,
-        },
-        business: {
-            type: Schema.Types.ObjectId,
-            ref: 'Business',
-            required: true,
-        },
-        url: {
-            type: String,
-            required: [true, 'URL is required'],
-        },
-        isActive: {
-            type: Boolean,
-            default: true,
-        },
-        surveyTitle: {
-            type: String,
-            required: false,
-        }
+const QRCodeSchema = new Schema({
+    code: {
+        type: String,
+        required: true,
+        unique: true,
+        trim: true
     },
-    {
-        timestamps: true,
+    url: {
+        type: String,
+        required: true
+    },
+    surveyId: {
+        type: Schema.Types.ObjectId,
+        ref: 'Survey',
+        required: true
+    },
+    survey: {
+        type: Schema.Types.ObjectId,
+        ref: 'Survey',
+        required: true
+    },
+    businessId: {
+        type: Schema.Types.ObjectId,
+        ref: 'Business',
+        required: true
+    },
+    business: {
+        type: Schema.Types.ObjectId,
+        ref: 'Business',
+        required: true
+    },
+    isActive: {
+        type: Boolean,
+        default: true
+    },
+    scanCount: {
+        type: Number,
+        default: 0
+    },
+    surveyTitle: {
+        type: String,
+        default: ''
+    },
+    description: {
+        type: String,
+        default: ''
+    },
+    location: {
+        type: String,
+        default: ''
     }
-);
+}, { timestamps: true });
+
+// İndeksler oluştur
+QRCodeSchema.index({ code: 1 }, { unique: true });
+QRCodeSchema.index({ surveyId: 1 });
+QRCodeSchema.index({ businessId: 1 });
 
 // Pre-save middleware to ensure we have both naming conventions filled
 QRCodeSchema.pre('save', function (next) {

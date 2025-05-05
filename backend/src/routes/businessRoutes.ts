@@ -18,6 +18,33 @@ const router = express.Router();
 // Public routes (for development only)
 router.post('/create-default', createDefaultBusiness);
 
+// E-posta ile işletme sorgulaması (giriş kolaylığı için public)
+router.get('/by-email', async (req, res) => {
+    try {
+        const { email } = req.query;
+
+        if (!email) {
+            return res.status(400).json({ success: false, message: 'Email parametresi gereklidir' });
+        }
+
+        const Business = require('../models/Business').default;
+        const business = await Business.findOne({ email }).select('-password');
+
+        if (!business) {
+            return res.status(404).json({ success: false, message: 'İşletme bulunamadı' });
+        }
+
+        res.json(business);
+    } catch (error: any) {
+        console.error('Email ile işletme sorgulama hatası:', error);
+        res.status(500).json({
+            success: false,
+            message: 'İşletme sorgulanırken bir hata oluştu',
+            error: error.message
+        });
+    }
+});
+
 // Protected routes
 router.get('/', protect, authorize([UserRole.SUPER_ADMIN]), getBusinesses);
 router.post('/', protect, authorize([UserRole.SUPER_ADMIN]), createBusiness);

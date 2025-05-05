@@ -50,6 +50,7 @@ const Business_1 = __importDefault(require("../models/Business"));
 const User_1 = __importDefault(require("../models/User"));
 const UserRole_1 = require("../types/UserRole");
 const bcrypt = __importStar(require("bcryptjs"));
+const mongoose_1 = __importDefault(require("mongoose"));
 // İşletmeleri listele
 const getBusinesses = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
@@ -274,15 +275,64 @@ exports.updateBusiness = updateBusiness;
 // İşletme sil
 const deleteBusiness = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
+        console.log(`İşletme silme isteği alındı. ID: ${req.params.id}`);
+        // İşletmeyi bul
         const business = yield Business_1.default.findById(req.params.id);
         if (!business) {
+            console.log('İşletme bulunamadı:', req.params.id);
             return res.status(404).json({ message: 'İşletme bulunamadı.' });
         }
+        console.log(`İşletme bulundu. İşletme adı: ${business.name}, ID: ${business._id}`);
+        // İlişkili kullanıcıları sil
+        console.log(`İşletmeye bağlı kullanıcılar siliniyor...`);
+        const usersDeleteResult = yield User_1.default.deleteMany({ business: business._id });
+        console.log(`Silinen kullanıcı sayısı: ${usersDeleteResult.deletedCount}`);
+        // Mongoose modelleri doğrudan burada import edilmediği için dinamik olarak import edelim
+        try {
+            // İlişkili anketleri sil
+            console.log(`İşletmeye bağlı anketler siliniyor...`);
+            const Survey = mongoose_1.default.model('Survey');
+            const surveysDeleteResult = yield Survey.deleteMany({ business: business._id });
+            console.log(`Silinen anket sayısı: ${surveysDeleteResult.deletedCount}`);
+            // İlişkili QR kodları sil
+            console.log(`İşletmeye bağlı QR kodlar siliniyor...`);
+            const QRCode = mongoose_1.default.model('QRCode');
+            const qrCodesDeleteResult = yield QRCode.deleteMany({ business: business._id });
+            console.log(`Silinen QR kod sayısı: ${qrCodesDeleteResult.deletedCount}`);
+            // İlişkili ödülleri sil
+            console.log(`İşletmeye bağlı ödüller siliniyor...`);
+            const Reward = mongoose_1.default.model('Reward');
+            const rewardsDeleteResult = yield Reward.deleteMany({ businessId: business._id });
+            console.log(`Silinen ödül sayısı: ${rewardsDeleteResult.deletedCount}`);
+            // İlişkili yanıtları sil
+            console.log(`İşletmeye bağlı yanıtlar siliniyor...`);
+            const Response = mongoose_1.default.model('Response');
+            const responsesDeleteResult = yield Response.deleteMany({ business: business._id });
+            console.log(`Silinen yanıt sayısı: ${responsesDeleteResult.deletedCount}`);
+        }
+        catch (modelError) {
+            console.error('İlişkili verileri silerken hata:', modelError);
+            // İşleme devam et - model bulunamasa bile işletmeyi silmeye çalışacağız
+        }
+        // İşletmeyi sil
+        console.log(`İşletme siliniyor...`);
         yield Business_1.default.findByIdAndDelete(req.params.id);
-        res.json({ message: 'İşletme başarıyla silindi.' });
+        console.log(`İşletme başarıyla silindi: ${business._id}`);
+        res.json({
+            message: 'İşletme ve tüm ilişkili veriler başarıyla silindi.',
+            deletedBusinessId: business._id
+        });
     }
     catch (error) {
-        res.status(500).json({ message: 'İşletme silinirken bir hata oluştu.' });
+        console.error('İşletme silinirken hata oluştu:', error);
+        console.error('Hata detayları:', {
+            message: error.message,
+            stack: error.stack
+        });
+        res.status(500).json({
+            message: 'İşletme silinirken bir hata oluştu.',
+            error: error.message
+        });
     }
 });
 exports.deleteBusiness = deleteBusiness;

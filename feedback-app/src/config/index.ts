@@ -1,6 +1,6 @@
 // Configuration constants
-// Using a relative URL will leverage the proxy setting in package.json
-export const API_URL = '/api'; // Add /api prefix to all requests
+// Using the same IP address as mobile app for consistency
+export const API_URL = 'http://172.20.10.2:5001/api';
 
 // Application information
 export const APP_NAME = 'Geri Bildirim';

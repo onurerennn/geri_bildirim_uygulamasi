@@ -369,69 +369,47 @@ export const createSurvey = async (req: Request, res: ExpressResponse) => {
 
         // Anket veritabanına başarıyla kaydedildiyse QR kodları oluştur
         if (savedSurvey && savedSurvey._id) {
-            console.log('✅ QR kodları oluşturuluyor...');
+            console.log('✅ QR kodu oluşturuluyor...');
 
-            // Birden fazla QR Kodu oluştur
+            // Tek bir QR Kodu oluştur
             const qrCodes = [];
             const baseUrl = process.env.FRONTEND_URL || 'https://feedback.app';
 
             try {
-                // Ana QR kodu oluştur (index = 0)
-                const mainUniqueCode = generateUniqueQRCode(savedSurvey._id as mongoose.Types.ObjectId, savedSurvey.title);
-                const mainSurveyUrl = `${baseUrl}/survey/code/${mainUniqueCode}`;
+                // QR kodu oluştur
+                const uniqueCode = generateUniqueQRCode(savedSurvey._id as mongoose.Types.ObjectId, savedSurvey.title);
+                const surveyUrl = `${baseUrl}/survey/code/${uniqueCode}`;
 
-                const mainQRCode = new QRCode({
+                const qrCode = new QRCode({
                     businessId: businessId,
                     business: businessId,
                     surveyId: savedSurvey._id,
                     survey: savedSurvey._id,
-                    code: mainUniqueCode,
-                    url: mainSurveyUrl,
+                    code: uniqueCode,
+                    url: surveyUrl,
                     isActive: true,
                     surveyTitle: savedSurvey.title,
-                    description: "Ana QR Kod"
+                    description: "Anket QR Kodu"
                 });
 
-                await mainQRCode.save();
-                qrCodes.push(mainQRCode);
-                console.log('✅ Ana QR Kod oluşturuldu:', mainQRCode._id);
+                await qrCode.save();
+                qrCodes.push(qrCode);
+                console.log('✅ QR Kod oluşturuldu:', qrCode._id);
 
-                // 3 adet ek QR kodu oluştur (indeksler: 1, 2, 3)
-                for (let i = 1; i <= 3; i++) {
-                    const uniqueCode = generateUniqueQRCode(savedSurvey._id as mongoose.Types.ObjectId, savedSurvey.title, i);
-                    const surveyUrl = `${baseUrl}/survey/code/${uniqueCode}`;
-
-                    const qrCode = new QRCode({
-                        businessId: businessId,
-                        business: businessId,
-                        surveyId: savedSurvey._id,
-                        survey: savedSurvey._id,
-                        code: uniqueCode,
-                        url: surveyUrl,
-                        isActive: true,
-                        surveyTitle: savedSurvey.title,
-                        description: `Ek QR Kod ${i}`
-                    });
-
-                    await qrCode.save();
-                    qrCodes.push(qrCode);
-                    console.log(`✅ Ek QR Kod ${i} oluşturuldu:`, qrCode._id);
-                }
-
-                // Anketi QR kodlarla birlikte döndür
+                // Anketi QR kodla birlikte döndür
                 return res.status(201).json({
                     success: true,
                     survey: savedSurvey,
                     qrCodes: qrCodes,
-                    message: 'Anket başarıyla oluşturuldu ve 4 adet QR kod oluşturuldu'
+                    message: 'Anket başarıyla oluşturuldu ve QR kod oluşturuldu'
                 });
 
             } catch (qrError) {
-                console.error('❌ QR kodları oluşturulurken hata:', qrError);
+                console.error('❌ QR kodu oluşturulurken hata:', qrError);
                 // QR kod oluşturulamadıysa bile anket oluşturuldu, ancak hatayı bildir
                 return res.status(201).json({
                     success: true,
-                    warning: 'QR kodları oluşturulamadı, ancak anket kaydedildi',
+                    warning: 'QR kodu oluşturulamadı, ancak anket kaydedildi',
                     survey: savedSurvey,
                     error: qrError instanceof Error ? qrError.message : 'QR kod oluşturma hatası'
                 });
@@ -491,36 +469,72 @@ export const updateSurvey = async (req: Request, res: ExpressResponse) => {
 // @access  Private/Business
 export const deleteSurvey = async (req: Request, res: ExpressResponse) => {
     try {
-        const { id } = req.params;
+        // Extract surveyId from params - check both id and surveyId options
+        const surveyId = req.params.id || req.params.surveyId;
 
-        if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(400).json({ error: 'Geçersiz anket ID' });
+        console.log(`🗑️ Silme isteği alındı - Anket ID: ${surveyId}`);
+        console.log('İstek detayları:', {
+            method: req.method,
+            url: req.originalUrl,
+            params: req.params,
+            user: req.user ? { id: req.user.id, role: req.user.role } : 'Kullanıcı bilgisi yok'
+        });
+
+        if (!mongoose.Types.ObjectId.isValid(surveyId)) {
+            console.log(`❌ Geçersiz ID formatı: ${surveyId}`);
+            return res.status(400).json({ error: 'Geçersiz anket ID formatı' });
         }
 
         // Önce anketi bul
-        const survey = await Survey.findById(id);
+        const survey = await Survey.findById(surveyId);
+
         if (!survey) {
+            console.log(`❌ Anket bulunamadı: ${surveyId}`);
             return res.status(404).json({ error: 'Anket bulunamadı' });
         }
+
+        console.log(`✅ Anket bulundu: ${survey.title} (${surveyId})`);
 
         // Yetki kontrolü
         if (req.user.role !== UserRole.SUPER_ADMIN) {
             // İşletme yöneticisi sadece kendi işletmesinin anketlerini silebilir
             if (req.user.role === UserRole.BUSINESS_ADMIN &&
                 survey.business.toString() !== req.user.business?.toString()) {
+                console.log(`❌ Yetki hatası: Kullanıcı (${req.user.id}) bu anketi silme yetkisine sahip değil`);
                 return res.status(403).json({ error: 'Bu anketi silme yetkiniz bulunmamaktadır' });
             }
         }
 
         // İlişkili QR kodlarını da sil
-        await QRCode.deleteMany({ survey: id });
+        const qrResult = await QRCode.deleteMany({ survey: surveyId });
+        console.log(`🔗 İlişkili QR kodları silindi: ${qrResult.deletedCount} adet`);
 
-        // Anketi sil
-        await Survey.findByIdAndDelete(id);
+        // Anketi sil - findByIdAndDelete metodunu kullan
+        const deleteResult = await Survey.findByIdAndDelete(surveyId);
 
-        res.status(200).json({ message: 'Anket ve ilişkili QR kodları başarıyla silindi' });
+        if (!deleteResult) {
+            console.log(`⚠️ Silme işlemi tamamlandı fakat sonuç boş: ${surveyId}`);
+            // İşlemi başarılı kabul et ama uyarı ver
+            return res.status(200).json({
+                message: 'Anket ve ilişkili QR kodları silindi, ancak silme işlemi doğrulanamadı',
+                warning: true
+            });
+        }
+
+        console.log(`✅ Anket başarıyla silindi: ${surveyId}`);
+        res.status(200).json({
+            message: 'Anket ve ilişkili QR kodları başarıyla silindi',
+            deletedSurvey: {
+                id: surveyId,
+                title: survey.title
+            }
+        });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        console.error('❌ Anket silme hatası:', error);
+        res.status(500).json({
+            error: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 };
 
@@ -890,5 +904,141 @@ export const deleteQRCode = async (req: Request, res: ExpressResponse) => {
             message: 'QR kod silinirken bir hata oluştu',
             error: error.message
         });
+    }
+};
+
+/**
+ * @desc    Get QR code image
+ * @route   GET /api/surveys/qr/image/:qrCodeId
+ * @access  Public
+ */
+export const getQRCodeImage = async (req: Request, res: ExpressResponse) => {
+    try {
+        const { qrCodeId } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(qrCodeId)) {
+            return res.status(400).json({ error: 'Geçersiz QR Kod ID' });
+        }
+
+        // QR Kodu bul
+        const qrCode = await QRCode.findById(qrCodeId);
+
+        if (!qrCode) {
+            return res.status(404).json({ error: 'QR kod bulunamadı' });
+        }
+
+        // QR kod URL'inden kod oluştur
+        const qrDataURL = await qrcode.toDataURL(qrCode.url);
+
+        // Base64 veriyi PNG'ye dönüştür
+        const base64Data = qrDataURL.replace(/^data:image\/png;base64,/, "");
+        const imageBuffer = Buffer.from(base64Data, 'base64');
+
+        // İstemciye PNG olarak gönder
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Content-Disposition', `inline; filename="qrcode-${qrCodeId}.png"`);
+        res.send(imageBuffer);
+
+    } catch (error: any) {
+        console.error('QR kod görüntüsü oluşturma hatası:', error);
+        res.status(500).json({ error: error.message });
+    }
+};
+
+/**
+ * @desc    Update QR code
+ * @route   PUT /api/surveys/qr/:qrCodeId
+ * @access  Private/Business
+ */
+export const updateQRCode = async (req: Request, res: ExpressResponse) => {
+    try {
+        const { qrCodeId } = req.params;
+        const { description, isActive } = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(qrCodeId)) {
+            return res.status(400).json({ error: 'Geçersiz QR Kod ID' });
+        }
+
+        // QR kodu bul
+        const qrCode = await QRCode.findById(qrCodeId);
+
+        if (!qrCode) {
+            return res.status(404).json({ error: 'QR kod bulunamadı' });
+        }
+
+        // Yetki kontrolü - Sadece ilgili işletme veya süper admin güncelleyebilir
+        if (req.user.role === UserRole.BUSINESS_ADMIN) {
+            const businessIdStr = qrCode.businessId.toString();
+            const userBusinessIdStr = req.user.business?.toString();
+
+            if (businessIdStr !== userBusinessIdStr) {
+                return res.status(403).json({ error: 'Bu QR kodu güncelleme yetkiniz yok' });
+            }
+        } else if (req.user.role !== UserRole.SUPER_ADMIN) {
+            return res.status(403).json({ error: 'Bu işlem için yetkiniz bulunmamaktadır' });
+        }
+
+        // Güncellenecek alanları belirle
+        const updateData: any = {};
+
+        if (description !== undefined) {
+            updateData.description = description;
+        }
+
+        if (isActive !== undefined) {
+            updateData.isActive = isActive;
+        }
+
+        // QR kodu güncelle
+        const updatedQRCode = await QRCode.findByIdAndUpdate(
+            qrCodeId,
+            updateData,
+            { new: true }
+        );
+
+        res.status(200).json({
+            success: true,
+            message: 'QR kod başarıyla güncellendi',
+            qrCode: updatedQRCode
+        });
+    } catch (error: any) {
+        console.error('QR kod güncelleme hatası:', error);
+        res.status(500).json({ error: error.message });
+    }
+};
+
+/**
+ * @desc    Increment QR code scan count
+ * @route   POST /api/surveys/qr/scan
+ * @access  Public
+ */
+export const incrementQRCodeScanCount = async (req: Request, res: ExpressResponse) => {
+    try {
+        const { code } = req.body;
+
+        if (!code) {
+            return res.status(400).json({ error: 'QR kod gereklidir' });
+        }
+
+        // QR Kodu bul
+        const qrCode = await QRCode.findOne({ code });
+
+        if (!qrCode) {
+            return res.status(404).json({ error: 'QR kod bulunamadı' });
+        }
+
+        // Tarama sayısını artır
+        qrCode.scanCount = (qrCode.scanCount || 0) + 1;
+        await qrCode.save();
+
+        return res.status(200).json({
+            success: true,
+            message: 'QR kod tarama sayısı güncellendi',
+            scanCount: qrCode.scanCount
+        });
+
+    } catch (error: any) {
+        console.error('QR kod tarama hatası:', error);
+        return res.status(500).json({ error: error.message });
     }
 }; 

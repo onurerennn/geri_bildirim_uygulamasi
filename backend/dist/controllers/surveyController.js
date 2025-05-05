@@ -17,7 +17,7 @@ const models_1 = require("../models");
 const mongoose_1 = __importDefault(require("mongoose"));
 const UserRole_1 = require("../types/UserRole");
 const qrcode_1 = __importDefault(require("qrcode"));
-const express_async_handler_1 = require("express-async-handler");
+const express_async_handler_1 = __importDefault(require("express-async-handler"));
 // @desc    Get active surveys
 // @route   GET /api/surveys/active
 // @access  Public
@@ -234,19 +234,20 @@ const generateUniqueQRCode = (surveyId, surveyTitle, index = 0) => {
 // @access  Private/Business
 const createSurvey = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
+    console.log('💡 createSurvey controller çağrıldı');
+    console.log('📝 Gelen veri:', {
+        body: Object.assign(Object.assign({}, req.body), { questions: `${((_a = req.body.questions) === null || _a === void 0 ? void 0 : _a.length) || 0} adet soru` }),
+        user: req.user ? {
+            id: req.user.id,
+            role: req.user.role,
+            business: req.user.business || null
+        } : 'Kullanıcı bilgisi yok'
+    });
     try {
-        console.log('Anket oluşturma isteği alındı:', {
-            body: Object.assign(Object.assign({}, req.body), { questions: `${((_a = req.body.questions) === null || _a === void 0 ? void 0 : _a.length) || 0} adet soru` }),
-            userInfo: req.user ? {
-                id: req.user.id,
-                role: req.user.role,
-                business: req.user.business || null
-            } : 'Kullanıcı bilgisi yok'
-        });
         const { title, description, questions, startDate, endDate } = req.body;
         // İşletme ve kullanıcı bilgilerini kontrol et
         if (!req.user) {
-            console.error('Kullanıcı bilgisi eksik, yetkilendirme yapılamadı');
+            console.error('❌ Kullanıcı bilgisi eksik, yetkilendirme yapılamadı');
             return res.status(401).json({ error: 'Kullanıcı bilgisi bulunamadı, lütfen tekrar giriş yapın' });
         }
         let businessId;
@@ -254,23 +255,23 @@ const createSurvey = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         if (req.user.role === UserRole_1.UserRole.BUSINESS_ADMIN) {
             // İş yeri yöneticisi ise, kendisine atanmış işletmeyi kullan
             if (!req.user.business) {
-                console.error('İşletme yöneticisine atanmış işletme bulunamadı');
+                console.error('❌ İşletme yöneticisine atanmış işletme bulunamadı');
                 return res.status(400).json({ error: 'İşletme bilgisi eksik, profil bilgilerinizi güncelleyin' });
             }
             businessId = req.user.business;
-            console.log('İşletme yöneticisi: İşletme ID', businessId);
+            console.log('✅ İşletme yöneticisi: İşletme ID', businessId);
         }
         else if (req.user.role === UserRole_1.UserRole.SUPER_ADMIN) {
             // Süper admin ise, body'den gelen işletme ID'sini kullan
             if (!req.body.business) {
-                console.error('Süper admin için istek gövdesinde işletme bilgisi yok');
+                console.error('❌ Süper admin için istek gövdesinde işletme bilgisi yok');
                 return res.status(400).json({ error: 'İşletme bilgisi gereklidir' });
             }
             businessId = req.body.business;
-            console.log('Süper admin: İşletme ID', businessId);
+            console.log('✅ Süper admin: İşletme ID', businessId);
         }
         else {
-            console.error('Yetkisiz rol:', req.user.role);
+            console.error('❌ Yetkisiz rol:', req.user.role);
             return res.status(403).json({
                 success: false,
                 error: 'Bu işlem için yetkiniz bulunmamaktadır',
@@ -278,7 +279,7 @@ const createSurvey = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             });
         }
         if (!businessId) {
-            console.error('İşletme ID bulunamadı');
+            console.error('❌ İşletme ID bulunamadı');
             return res.status(400).json({ error: 'İşletme bilgisi gereklidir' });
         }
         try {
@@ -287,23 +288,28 @@ const createSurvey = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 ? businessId._id.toString()
                 : businessId.toString();
             if (!mongoose_1.default.Types.ObjectId.isValid(businessIdStr)) {
-                console.error('Geçersiz işletme ID formatı:', businessId);
+                console.error('❌ Geçersiz işletme ID formatı:', businessId);
                 return res.status(400).json({ error: 'Geçersiz işletme ID' });
             }
             // ID'yi doğru formatta ayarla
             businessId = new mongoose_1.default.Types.ObjectId(businessIdStr);
         }
         catch (idError) {
-            console.error('İşletme ID dönüştürme hatası:', idError);
+            console.error('❌ İşletme ID dönüştürme hatası:', idError);
             return res.status(400).json({ error: 'Geçersiz işletme ID formatı' });
         }
         // İşletmenin varlığını kontrol et
         const business = yield models_1.Business.findById(businessId);
         if (!business) {
-            console.error('İşletme bulunamadı:', businessId);
+            console.error('❌ İşletme bulunamadı:', businessId);
             return res.status(404).json({ error: 'İşletme bulunamadı' });
         }
-        console.log('Anket oluşturma doğrulamaları başarılı, veritabanına kaydediliyor...');
+        console.log('✅ Anket oluşturma doğrulamaları başarılı, veritabanına kaydediliyor...');
+        // Soruların geçerliliğini kontrol et
+        if (!questions || !Array.isArray(questions) || questions.length === 0) {
+            console.error('❌ Sorular eksik veya geçersiz format');
+            return res.status(400).json({ error: 'En az bir soru eklemelisiniz' });
+        }
         // Anket oluştur
         const survey = new models_1.Survey({
             title,
@@ -316,9 +322,10 @@ const createSurvey = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         });
         // Önce anketi veritabanına kaydet
         const savedSurvey = yield survey.save();
+        console.log('✅ Anket başarıyla kaydedildi, ID:', savedSurvey._id);
         // Anket veritabanına başarıyla kaydedildiyse QR kodları oluştur
         if (savedSurvey && savedSurvey._id) {
-            console.log('Anket kaydedildi, ID:', savedSurvey._id, 'QR kodları oluşturuluyor...');
+            console.log('✅ QR kodları oluşturuluyor...');
             // Birden fazla QR Kodu oluştur
             const qrCodes = [];
             const baseUrl = process.env.FRONTEND_URL || 'https://feedback.app';
@@ -339,7 +346,7 @@ const createSurvey = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 });
                 yield mainQRCode.save();
                 qrCodes.push(mainQRCode);
-                console.log('Ana QR Kod oluşturuldu:', mainQRCode._id);
+                console.log('✅ Ana QR Kod oluşturuldu:', mainQRCode._id);
                 // 3 adet ek QR kodu oluştur (indeksler: 1, 2, 3)
                 for (let i = 1; i <= 3; i++) {
                     const uniqueCode = generateUniqueQRCode(savedSurvey._id, savedSurvey.title, i);
@@ -353,45 +360,42 @@ const createSurvey = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                         url: surveyUrl,
                         isActive: true,
                         surveyTitle: savedSurvey.title,
-                        description: `QR Kod #${i}`
+                        description: `Ek QR Kod ${i}`
                     });
                     yield qrCode.save();
                     qrCodes.push(qrCode);
-                    console.log(`Ek QR Kod #${i} oluşturuldu:`, qrCode._id);
+                    console.log(`✅ Ek QR Kod ${i} oluşturuldu:`, qrCode._id);
                 }
-                // Başarılı yanıt - anket ve QR kodları
-                res.status(201).json({
+                // Anketi QR kodlarla birlikte döndür
+                return res.status(201).json({
                     success: true,
                     survey: savedSurvey,
-                    qrCodes: qrCodes
+                    qrCodes: qrCodes,
+                    message: 'Anket başarıyla oluşturuldu ve 4 adet QR kod oluşturuldu'
                 });
             }
             catch (qrError) {
-                console.error('QR Kod oluşturma hatası:', qrError);
-                // QR kodu oluşturma hatası durumunda bile anketi geri dön
-                res.status(201).json({
+                console.error('❌ QR kodları oluşturulurken hata:', qrError);
+                // QR kod oluşturulamadıysa bile anket oluşturuldu, ancak hatayı bildir
+                return res.status(201).json({
                     success: true,
+                    warning: 'QR kodları oluşturulamadı, ancak anket kaydedildi',
                     survey: savedSurvey,
-                    qrCodes: [],
-                    warning: 'Anket kaydedildi ancak QR kodları oluşturulurken hata oluştu'
+                    error: qrError instanceof Error ? qrError.message : 'QR kod oluşturma hatası'
                 });
             }
         }
         else {
-            // Anket kaydedilemezse hata döndür
-            console.error('Anket veritabanına kaydedilemedi');
-            res.status(500).json({
-                success: false,
-                error: 'Anket oluşturulurken bir hata oluştu'
-            });
+            console.error('❌ Anket kaydedildi ancak ID bilgisi alınamadı');
+            return res.status(500).json({ error: 'Anket kaydedildi ancak ID bilgisi alınamadı' });
         }
     }
     catch (error) {
-        console.error('Anket oluşturma hatası:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message,
-            details: error.stack
+        console.error('❌ Anket oluşturma hatası:', error);
+        return res.status(500).json({
+            error: 'Anket oluşturulurken bir hata oluştu',
+            message: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
     }
 });
@@ -569,18 +573,18 @@ exports.getBusinessQRCodes = getBusinessQRCodes;
  * @route   GET /api/surveys/qr/survey/:surveyId
  * @access  Private (Business Admin, Super Admin)
  */
-exports.getSurveyQRCodes = (0, express_async_handler_1.asyncHandler)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+exports.getSurveyQRCodes = (0, express_async_handler_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { surveyId } = req.params;
     // Validate surveyId
     if (!mongoose_1.default.Types.ObjectId.isValid(surveyId)) {
-        res.status(400);
-        throw new Error('Invalid survey ID');
+        res.status(400).json({ error: 'Invalid survey ID' });
+        return;
     }
     // Find survey to ensure it exists
     const survey = yield models_1.Survey.findById(surveyId);
     if (!survey) {
-        res.status(404);
-        throw new Error('Survey not found');
+        res.status(404).json({ error: 'Survey not found' });
+        return;
     }
     // Get all QR codes for this survey
     const qrCodes = yield models_1.QRCode.find({ surveyId });
