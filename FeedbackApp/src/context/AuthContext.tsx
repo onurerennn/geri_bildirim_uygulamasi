@@ -1,19 +1,23 @@
-import React, { createContext, useContext, ReactNode } from 'react';
-import { useAuth } from '../hooks/useAuth';
+import React, { createContext, useState, useEffect, useContext } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// AuthContext için tip tanımı
-interface AuthContextType {
-    user: any;
-    token: string | null;
-    isLoading: boolean;
+export type UserRole = 'SUPER_ADMIN' | 'BUSINESS_ADMIN' | 'CUSTOMER';
+
+export interface AuthContextType {
     isAuthenticated: boolean;
-    login: (email: string, password: string) => Promise<{ success: boolean; user?: any; error?: string }>;
-    register: (name: string, email: string, password: string) => Promise<{ success: boolean; autoLogin?: boolean; error?: string }>;
-    logout: (onLogoutComplete?: () => void) => Promise<void>;
+    userRole: UserRole | null;
+    token: string | null;
+    login: (token: string, role: UserRole) => Promise<void>;
+    logout: () => Promise<void>;
 }
 
-// AuthContext oluşturma
-export const AuthContext = createContext<AuthContextType | undefined>(undefined);
+export const AuthContext = createContext<AuthContextType>({
+    isAuthenticated: false,
+    userRole: null,
+    token: null,
+    login: async () => { },
+    logout: async () => { },
+});
 
 // useAuthContext hook'u
 export const useAuthContext = () => {
@@ -24,16 +28,68 @@ export const useAuthContext = () => {
     return context;
 };
 
-// AuthProvider bileşeni props tipi
-interface AuthProviderProps {
-    children: ReactNode;
-}
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+    const [isAuthenticated, setIsAuthenticated] = useState(false);
+    const [userRole, setUserRole] = useState<UserRole | null>(null);
+    const [token, setToken] = useState<string | null>(null);
 
-// AuthProvider bileşeni
-export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
-    // useAuth hook'undan kimlik doğrulama verilerini ve fonksiyonlarını al
-    const auth = useAuth();
+    useEffect(() => {
+        // Uygulama başladığında token ve rol bilgisini kontrol et
+        loadAuthState();
+    }, []);
 
-    // Context sağlayıcısını döndür
-    return <AuthContext.Provider value={auth}>{children}</AuthContext.Provider>;
+    const loadAuthState = async () => {
+        try {
+            const storedToken = await AsyncStorage.getItem('userToken');
+            const storedRole = await AsyncStorage.getItem('userRole') as UserRole;
+
+            if (storedToken && storedRole) {
+                setToken(storedToken);
+                setUserRole(storedRole);
+                setIsAuthenticated(true);
+            }
+        } catch (error) {
+            console.error('Auth state yükleme hatası:', error);
+        }
+    };
+
+    const login = async (newToken: string, role: UserRole) => {
+        try {
+            await AsyncStorage.setItem('userToken', newToken);
+            await AsyncStorage.setItem('userRole', role);
+            setToken(newToken);
+            setUserRole(role);
+            setIsAuthenticated(true);
+        } catch (error) {
+            console.error('Login hatası:', error);
+            throw new Error('Login işlemi başarısız oldu');
+        }
+    };
+
+    const logout = async () => {
+        try {
+            await AsyncStorage.removeItem('userToken');
+            await AsyncStorage.removeItem('userRole');
+            setToken(null);
+            setUserRole(null);
+            setIsAuthenticated(false);
+        } catch (error) {
+            console.error('Logout hatası:', error);
+            throw new Error('Logout işlemi başarısız oldu');
+        }
+    };
+
+    return (
+        <AuthContext.Provider
+            value={{
+                isAuthenticated,
+                userRole,
+                token,
+                login,
+                logout,
+            }}
+        >
+            {children}
+        </AuthContext.Provider>
+    );
 }; 

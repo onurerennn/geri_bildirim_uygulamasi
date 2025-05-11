@@ -56,7 +56,7 @@ const QRCodes: React.FC = () => {
                     return;
                 }
 
-                const response = await api.get(`/api/surveys/qr/business/${user.business}`);
+                const response = await api.get(`/surveys/qr/business/${user.business}`);
                 setQrCodes(response.data);
                 setLoading(false);
             } catch (err: any) {
@@ -228,7 +228,7 @@ const QRCodes: React.FC = () => {
 
         try {
             setLoading(true);
-            await api.delete(`/api/surveys/qr/${deleteId}`);
+            await api.delete(`/surveys/qr/${deleteId}`);
 
             // Silinen QR kodu listeden çıkar
             setQrCodes(qrCodes.filter(qr => qr._id !== deleteId));
@@ -273,14 +273,14 @@ const QRCodes: React.FC = () => {
                         Henüz hiç QR kodunuz bulunmamaktadır. Anket oluşturduğunuzda otomatik olarak QR kodları oluşturulacaktır.
                     </Alert>
                 ) : (
-                <Stack direction="row" flexWrap="wrap" gap={2}>
-                    {qrCodes.map((qr) => (
+                    <Stack direction="row" flexWrap="wrap" gap={2}>
+                        {qrCodes.map((qr) => (
                             <Box key={qr._id} sx={{ width: { xs: '100%', sm: '45%', md: '30%' } }}>
                                 <Card elevation={3}>
-                                <CardContent>
-                                    <Typography variant="h6" component="h2" gutterBottom>
+                                    <CardContent>
+                                        <Typography variant="h6" component="h2" gutterBottom>
                                             {qr.surveyTitle || qr.survey?.title || 'Anket'}
-                                    </Typography>
+                                        </Typography>
                                         <Box sx={{
                                             display: 'flex',
                                             justifyContent: 'center',
@@ -291,7 +291,7 @@ const QRCodes: React.FC = () => {
                                             border: '1px solid #eee'
                                         }}>
                                             <QRCodeSVG id={`qr-code-${qr._id}`} value={qr.url} size={200} level="H" />
-                                    </Box>
+                                        </Box>
                                         <TextField
                                             label="QR Kod ID"
                                             value={qr.code}
@@ -315,7 +315,7 @@ const QRCodes: React.FC = () => {
                                                 readOnly: true,
                                             }}
                                         />
-                                </CardContent>
+                                    </CardContent>
                                     <Divider />
                                     <CardActions sx={{ justifyContent: 'center', p: 2 }}>
                                         <Button
@@ -345,10 +345,10 @@ const QRCodes: React.FC = () => {
                                             Sil
                                         </Button>
                                     </CardActions>
-                            </Card>
-                        </Box>
-                    ))}
-                </Stack>
+                                </Card>
+                            </Box>
+                        ))}
+                    </Stack>
                 )}
             </Stack>
 

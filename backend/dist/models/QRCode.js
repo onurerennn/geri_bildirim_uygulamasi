@@ -37,44 +37,59 @@ const mongoose_1 = __importStar(require("mongoose"));
 const QRCodeSchema = new mongoose_1.Schema({
     code: {
         type: String,
-        required: [true, 'QR code is required'],
+        required: true,
         unique: true,
+        trim: true
+    },
+    url: {
+        type: String,
+        required: true
     },
     surveyId: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'Survey',
-        required: true,
+        required: true
     },
     survey: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'Survey',
-        required: true,
+        required: true
     },
     businessId: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'Business',
-        required: true,
+        required: true
     },
     business: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: 'Business',
-        required: true,
-    },
-    url: {
-        type: String,
-        required: [true, 'URL is required'],
+        required: true
     },
     isActive: {
         type: Boolean,
-        default: true,
+        default: true
+    },
+    scanCount: {
+        type: Number,
+        default: 0
     },
     surveyTitle: {
         type: String,
-        required: false,
+        default: ''
+    },
+    description: {
+        type: String,
+        default: ''
+    },
+    location: {
+        type: String,
+        default: ''
     }
-}, {
-    timestamps: true,
-});
+}, { timestamps: true });
+// İndeksler oluştur
+QRCodeSchema.index({ code: 1 }, { unique: true });
+QRCodeSchema.index({ surveyId: 1 });
+QRCodeSchema.index({ businessId: 1 });
 // Pre-save middleware to ensure we have both naming conventions filled
 QRCodeSchema.pre('save', function (next) {
     // If surveyId is set but survey is not, copy value

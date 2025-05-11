@@ -17,9 +17,9 @@ const authService = {
     login: async (credentials: LoginCredentials): Promise<{ token: string; user: User }> => {
         try {
             console.log('Login credentials:', { email: credentials.email, password: '***' });
-            console.log('Sending login request to:', `${api.defaults.baseURL}/api/auth/login`);
+            console.log('Sending login request to:', `${api.defaults.baseURL}/auth/login`);
 
-            const response = await api.post('/api/auth/login', credentials);
+            const response = await api.post('/auth/login', credentials);
 
             // Tüm yanıtı logla
             console.log('Raw login response:', JSON.stringify(response.data, null, 2));
@@ -85,7 +85,7 @@ const authService = {
                 ...data,
                 password: '[HIDDEN]'
             });
-            const response = await api.post('/api/auth/register', data);
+            const response = await api.post('/auth/register', data);
             console.log('Registration response:', {
                 status: response.status,
                 data: {
@@ -107,7 +107,7 @@ const authService = {
 
     getCurrentUser: async (): Promise<User> => {
         try {
-            const response = await api.get('/api/auth/me');
+            const response = await api.get('/auth/me');
 
             // Kullanıcı rolü kontrolü
             if (response.data && !response.data.role) {

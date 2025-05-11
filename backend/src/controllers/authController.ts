@@ -183,11 +183,43 @@ export const login = async (req: Request, res: Response) => {
                     // Şifreyi response'dan kaldır
                     const userData = user.toJSON();
 
+                    // BUSINESS_ADMIN rolü için işletme kontrol et
+                    if (user.role === UserRole.BUSINESS_ADMIN && !user.business) {
+                        console.log('BUSINESS_ADMIN kullanıcısının işletme bilgisi yok, varsayılan işletme aranıyor...');
+
+                        try {
+                            // Sistemdeki ilk aktif işletmeyi bul
+                            const defaultBusiness = await Business.findOne({ isActive: true });
+
+                            if (defaultBusiness) {
+                                console.log('Varsayılan işletme bulundu, kullanıcıya atanıyor:', defaultBusiness._id);
+
+                                // Kullanıcıya işletme ID'sini ata ve kaydet
+                                user.business = defaultBusiness._id;
+                                await User.findByIdAndUpdate(user._id, { business: defaultBusiness._id });
+
+                                // userData objesini de güncelle
+                                userData.business = defaultBusiness._id;
+
+                                console.log('Kullanıcıya işletme atandı:', {
+                                    userId: user._id,
+                                    businessId: defaultBusiness._id,
+                                    businessName: defaultBusiness.name
+                                });
+                            } else {
+                                console.warn('Varsayılan işletme bulunamadı.');
+                            }
+                        } catch (businessError) {
+                            console.error('İşletme atama hatası:', businessError);
+                        }
+                    }
+
                     // Giriş başarılı
                     console.log('GİRİŞ BAŞARILI. Kullanıcı:', {
                         id: user._id,
                         email: user.email,
-                        role: user.role
+                        role: user.role,
+                        business: user.business || 'Yok'
                     });
                     console.log('---------------------------------------');
 

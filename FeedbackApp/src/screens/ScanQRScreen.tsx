@@ -1,68 +1,38 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator, Keyboard, TouchableWithoutFeedback, Platform } from 'react-native';
-import * as BarCodeScannerModule from 'expo-barcode-scanner';
+
 // @ts-ignore
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
 // @ts-ignore
 import { StackNavigationProp } from '@react-navigation/stack';
 
-// BarCodeScanner bileşenini özel olarak al
-const BarCodeScanner = BarCodeScannerModule.BarCodeScanner;
-
 interface NavigationProps {
     navigation: StackNavigationProp<any, any>;
 }
 
+// BarCodeScanner için tip tanımlaması
+interface BarCodeEvent {
+    type: string;
+    data: string;
+}
+
 const ScanQRScreen: React.FC<NavigationProps> = ({ navigation }) => {
-    const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+    const [hasPermission, setHasPermission] = useState<boolean | null>(false);
     const [scanned, setScanned] = useState(false);
-    const [scanMode, setScanMode] = useState(true); // true = kamera, false = manuel giriş
+    const [scanMode, setScanMode] = useState(false); // false = manuel giriş, true = kamera
     const [manualCode, setManualCode] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
 
-    useEffect(() => {
-        (async () => {
-            try {
-                // Platform kontrolü ekleyelim
-                if (Platform.OS === 'web') {
-                    setHasPermission(false);
-                    return;
-                }
-                const { status } = await BarCodeScannerModule.requestPermissionsAsync();
-                setHasPermission(status === 'granted');
-            } catch (err) {
-                console.error('Kamera izni hatası:', err);
-                setHasPermission(false);
-            }
-        })();
-    }, []);
-
-    const handleBarCodeScanned = ({ type, data }: { type: string; data: string }) => {
-        setScanned(true);
-        console.log(`QR kod (${type}) tarandı: ${data}`);
-
-        // Eğer URL tarandıysa, URL'den kodu çıkar
-        let code = data;
-
-        // URL formatındaysa kodu çıkar
-        if (data.includes('/code/')) {
-            const parts = data.split('/code/');
-            if (parts.length > 1) {
-                code = parts[1].split('/')[0]; // Olası query parametrelerini temizle
-            }
-        }
-
-        if (code) {
-            processCode(code);
-        } else {
-            Alert.alert(
-                "Geçersiz QR Kod",
-                "Taranılan QR kod geçerli bir anket kodu içermiyor.",
-                [{ text: "Tekrar Tara", onPress: () => setScanned(false) }]
-            );
-        }
+    const toggleScanMode = () => {
+        // Şimdilik kamera modunu devre dışı bırakalım
+        // setScanMode(!scanMode);
+        Alert.alert(
+            "Kamera Kullanılamıyor",
+            "Bu sürümde kamera modülü aktif değil. Lütfen manuel kod girişi kullanın.",
+            [{ text: "Tamam", style: "default" }]
+        );
     };
 
     const handleManualSubmit = () => {
@@ -120,42 +90,22 @@ const ScanQRScreen: React.FC<NavigationProps> = ({ navigation }) => {
             setError(err.message || 'Anket yüklenirken bir hata oluştu');
         } finally {
             setIsLoading(false);
-            if (scanMode) {
-                // Kamera modundaysa taramayı sıfırla
-                setTimeout(() => {
-                    setScanned(false);
-                }, 2000);
-            }
         }
     };
 
-    const toggleScanMode = () => {
-        setScanMode(!scanMode);
-        setScanned(false);
-        setError('');
-    };
-
-    if (hasPermission === null) {
-        return (
-            <View style={styles.centered}>
-                <ActivityIndicator size="large" color="#3498db" />
-                <Text style={styles.permissionText}>Kamera izni isteniyor...</Text>
-            </View>
-        );
-    }
-
-    if (hasPermission === false) {
+    // Kamera modülü kullanılamıyor mesajını göster
+    const renderUnavailableCamera = () => {
         return (
             <View style={styles.centered}>
                 <Ionicons name="close-circle" size={64} color="#e74c3c" />
-                <Text style={styles.permissionText}>Kamera erişimi reddedildi</Text>
-                <Text style={styles.permissionSubtext}>QR kodu taramak için kamera iznine ihtiyacımız var.</Text>
-                <TouchableOpacity style={styles.manualButton} onPress={toggleScanMode}>
+                <Text style={styles.permissionText}>Kamera kullanılamıyor</Text>
+                <Text style={styles.permissionSubtext}>Bu sürümde kamera işlevi aktif değil. Lütfen manuel kod girişi kullanın.</Text>
+                <TouchableOpacity style={styles.manualButton} onPress={() => setScanMode(false)}>
                     <Text style={styles.manualButtonText}>Manuel Kod Girişi</Text>
                 </TouchableOpacity>
             </View>
         );
-    }
+    };
 
     return (
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
@@ -188,33 +138,7 @@ const ScanQRScreen: React.FC<NavigationProps> = ({ navigation }) => {
                         <Text style={styles.loadingText}>Anket yükleniyor...</Text>
                     </View>
                 ) : scanMode ? (
-                    <View style={styles.scanContainer}>
-                        <View style={styles.cameraContainer}>
-                            {Platform.OS !== 'web' && (
-                                <BarCodeScanner
-                                    onBarCodeScanned={scanned ? undefined : handleBarCodeScanned}
-                                    style={styles.camera}
-                                    barCodeTypes={[
-                                        BarCodeScannerModule.Constants.BarCodeType.qr,
-                                        BarCodeScannerModule.Constants.BarCodeType.code128
-                                    ]}
-                                />
-                            )}
-                            <View style={styles.scanOverlay}>
-                                <View style={styles.scanFrame} />
-                            </View>
-                            {scanned && (
-                                <View style={styles.scannedOverlay}>
-                                    <Text style={styles.scannedText}>QR Kod Tarandı</Text>
-                                    <ActivityIndicator color="white" />
-                                </View>
-                            )}
-                        </View>
-                        <Text style={styles.instructionText}>
-                            Taramak için QR kodu kare içine yerleştirin
-                        </Text>
-                        {error ? <Text style={styles.errorText}>{error}</Text> : null}
-                    </View>
+                    renderUnavailableCamera()
                 ) : (
                     <View style={styles.manualContainer}>
                         <View style={styles.iconContainer}>
@@ -278,52 +202,6 @@ const styles = StyleSheet.create({
     },
     modeButton: {
         padding: 8,
-    },
-    scanContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    cameraContainer: {
-        width: '100%',
-        height: '70%',
-        position: 'relative',
-        overflow: 'hidden',
-    },
-    camera: {
-        ...StyleSheet.absoluteFillObject,
-    },
-    scanOverlay: {
-        ...StyleSheet.absoluteFillObject,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: 'rgba(0,0,0,0.5)',
-    },
-    scanFrame: {
-        width: 250,
-        height: 250,
-        borderWidth: 2,
-        borderColor: 'white',
-        backgroundColor: 'transparent',
-    },
-    scannedOverlay: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(46, 204, 113, 0.8)',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    scannedText: {
-        color: 'white',
-        fontSize: 18,
-        fontWeight: 'bold',
-        marginBottom: 16,
-    },
-    instructionText: {
-        fontSize: 16,
-        color: '#34495e',
-        textAlign: 'center',
-        marginTop: 20,
-        paddingHorizontal: 20,
     },
     errorText: {
         color: '#e74c3c',

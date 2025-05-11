@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useContext, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator, Alert } from 'react-native';
-import { useAuthContext } from '../context/AuthContext';
+import { AuthContext } from '../context/AuthContext';
 import api from '../services/api';
 
 interface LoginScreenProps {
@@ -24,7 +24,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation, route }) => {
     const [showDebugInfo, setShowDebugInfo] = useState(false);
 
     // Auth context'ten login fonksiyonunu al
-    const { login } = useAuthContext();
+    const auth = useContext(AuthContext);
 
     // Form parametrelerinin otomatik doldurulması için
     useEffect(() => {
@@ -67,84 +67,50 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation, route }) => {
         setErrorMessage('');
 
         try {
-            // Email adresini küçük harfe çevirerek gönderelim
-            const normalizedEmail = email.toLowerCase().trim();
-            console.log('Giriş denenecek bilgiler:', { email: normalizedEmail, password: password ? '****' : 'boş' });
-
-            if (showDebugInfo) {
-                // API bağlantısı test ediliyor
-                try {
-                    const connectionTest = await api.testConnection();
-                    console.log('Giriş öncesi API testi:', connectionTest);
-
-                    // Doğrudan API ile bağlantı testi
-                    const pingResult = await api.ping();
-                    console.log('Ping sonucu:', pingResult);
-
-                    // Manuel doğrudan login testi
-                    try {
-                        console.log('Manuel login testi yapılıyor...');
-                        const directLoginResult = await api.login(normalizedEmail, password);
-                        console.log('Manuel login sonucu:', directLoginResult);
-
-                        // Başarılı manuel login
-                        Alert.alert(
-                            'Debug: Manuel Login Başarılı',
-                            `API'den doğrudan login başarılı oldu. Detaylar:\n` +
-                            `Kullanıcı ID: ${directLoginResult.data?._id || 'Yok'}\n` +
-                            `Rol: ${directLoginResult.data?.role || 'Yok'}\n` +
-                            `Token uzunluğu: ${directLoginResult.token ? directLoginResult.token.length : 'Yok'}`
-                        );
-                    } catch (loginError: any) {
-                        // Başarısız manuel login
-                        console.log('Manuel login hatası:', loginError);
-                        Alert.alert(
-                            'Debug: Manuel Login Hatası',
-                            `API'den doğrudan login başarısız oldu.\n` +
-                            `Hata: ${loginError.message || 'Bilinmiyor'}\n` +
-                            `Durum: ${loginError.response?.status || 'Yok'}\n` +
-                            `Mesaj: ${loginError.response?.data?.message || 'Yok'}`
-                        );
-                    }
-                } catch (testError: any) {
-                    console.log('Bağlantı testi hatası:', testError.message);
-                }
+            // Email adresini kontrol et ve küçük harfe çevirerek gönderelim
+            const normalizedEmail = email ? email.toLowerCase().trim() : '';
+            if (!normalizedEmail) {
+                setErrorMessage('Geçerli bir e-posta adresi giriniz.');
+                setIsLoading(false);
+                return;
             }
 
-            // Auth context üzerinden giriş işlemi
-            const result = await login(normalizedEmail, password);
-
+            const result = await api.login(normalizedEmail, password);
             console.log('Giriş sonucu:', result);
 
-            if (result.success && result.user) {
-                console.log('Giriş başarılı! Kullanıcı:', result.user);
-                console.log('Kullanıcı rolü:', result.user.role);
+            if (result.success && result.token && result.data) {
+                console.log('Giriş başarılı! Kullanıcı:', result.data);
+                console.log('Kullanıcı rolü:', result.data.role);
+
+                // Auth context'i güncelle
+                await auth.login(result.token, result.data.role);
 
                 // Kullanıcı rolüne göre yönlendirme
-                switch (result.user.role) {
+                switch (result.data.role) {
                     case 'SUPER_ADMIN':
                         navigation.reset({
                             index: 0,
-                            routes: [{ name: 'Dashboard' }],
+                            routes: [{ name: 'AdminTabs' }],
                         });
                         break;
                     case 'BUSINESS_ADMIN':
                         navigation.reset({
                             index: 0,
-                            routes: [{ name: 'BusinessDashboard' }],
+                            routes: [{ name: 'BusinessAdminTabs' }],
                         });
                         break;
                     case 'CUSTOMER':
                         navigation.reset({
                             index: 0,
-                            routes: [{ name: 'Home' }],
+                            routes: [{ name: 'CustomerTabs' }],
                         });
                         break;
                     default:
-                        console.warn('Bilinmeyen kullanıcı rolü:', result.user.role);
+                        console.warn('Bilinmeyen kullanıcı rolü:', result.data.role);
+                        // Varsayılan olarak müşteri tab'ına yönlendir
                         navigation.reset({
                             index: 0,
-                            routes: [{ name: 'Home' }],
+                            routes: [{ name: 'CustomerTabs' }],
                         });
                 }
             } else {

@@ -96,11 +96,11 @@ const SurveyQRCodes: React.FC = () => {
                 setError(null);
 
                 // Anket detaylarını getir
-                const surveyResponse = await api.get(`/api/surveys/${surveyId}`);
+                const surveyResponse = await api.get(`/surveys/${surveyId}`);
                 setSurvey(surveyResponse.data);
 
                 // QR kodlarını getir
-                const qrResponse = await api.get(`/api/surveys/qr/survey/${surveyId}`);
+                const qrResponse = await api.get(`/surveys/qr/survey/${surveyId}`);
                 setQrCodes(qrResponse.data);
 
                 setLoading(false);
@@ -249,7 +249,7 @@ const SurveyQRCodes: React.FC = () => {
 
         try {
             setLoading(true);
-            await api.delete(`/api/surveys/qr/${deleteId}`);
+            await api.delete(`/surveys/qr/${deleteId}`);
 
             // Silinen QR kodu listeden çıkar
             setQrCodes(qrCodes.filter(qr => qr._id !== deleteId));

@@ -9,6 +9,8 @@ import userRoutes from './routes/userRoutes';
 import authRoutes from './routes/authRoutes';
 import surveyRoutes from './routes/surveyRoutes';
 import businessRoutes from './routes/businessRoutes';
+import dashboardRoutes from './routes/dashboardRoutes';
+import businessSurveyRoutes from './routes/businessSurveyRoutes';
 
 dotenv.config();
 
@@ -19,8 +21,27 @@ connectDB();
 
 // CORS middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
-    // Allow all origins in development
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    // İstemcinin origin bilgisini al
+    const origin = req.headers.origin || '';
+
+    // İzin verilen originler
+    const allowedOrigins = [
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        'http://172.20.10.2:3000',
+        'http://172.20.10.2:19000',
+        'http://localhost:19000',
+        'http://localhost:19006'
+    ];
+
+    // İstemcinin origin'i bizim izin verdiğimiz listede mi?
+    if (allowedOrigins.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+        // Geliştirme aşamasında herkese izin ver
+        res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -65,10 +86,22 @@ app.use('/api/users', userRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/surveys', surveyRoutes);
 app.use('/api/businesses', businessRoutes);
+app.use('/api/business', businessSurveyRoutes);
+app.use('/api', dashboardRoutes);
 
 // Base route
 app.get('/', (req: Request, res: Response) => {
     res.json({ message: 'API is running...' });
+});
+
+// Ping endpoint - bağlantı testi için
+app.get('/api/ping', (req: Request, res: Response) => {
+    res.status(200).json({ message: 'Pong!', timestamp: new Date().toISOString() });
+});
+
+// Test endpoint
+app.get('/api/test', (req, res) => {
+    res.status(200).json({ message: 'Test başarılı!', timestamp: new Date().toISOString() });
 });
 
 // Error handling middleware

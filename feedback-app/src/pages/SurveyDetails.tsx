@@ -28,7 +28,9 @@ import {
     RadioButtonChecked as RadioIcon,
     TextFields as TextFieldsIcon,
     Star as StarIcon,
-    LinearScale as ScaleIcon
+    LinearScale as ScaleIcon,
+    BarChart as BarChartIcon,
+    Delete as DeleteIcon
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -322,13 +324,40 @@ const SurveyDetails: React.FC = () => {
                 >
                     Anketlere Dön
                 </Button>
-                <Button
-                    variant="contained"
-                    startIcon={<EditIcon />}
-                    onClick={() => navigate(`/business/surveys/${survey._id}/edit`)}
-                >
-                    Anketi Düzenle
-                </Button>
+                <Box sx={{ mt: 3, mb: 2, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                    <Button
+                        variant="contained"
+                        color="primary"
+                        onClick={() => navigate(`/business/surveys/${id}/edit`)}
+                        startIcon={<EditIcon />}
+                    >
+                        Anketi Düzenle
+                    </Button>
+                    <Button
+                        variant="outlined"
+                        color="primary"
+                        onClick={() => navigate(`/business/surveys/${id}/qr-codes`)}
+                        startIcon={<QrCodeIcon />}
+                    >
+                        QR Kodları
+                    </Button>
+                    <Button
+                        variant="outlined"
+                        color="secondary"
+                        onClick={() => navigate(`/survey/${id}/responses`)}
+                        startIcon={<BarChartIcon />}
+                    >
+                        Yanıtları Görüntüle
+                    </Button>
+                    <Button
+                        variant="outlined"
+                        color="error"
+                        onClick={handleDeleteSurvey}
+                        startIcon={<DeleteIcon />}
+                    >
+                        Anketi Sil
+                    </Button>
+                </Box>
             </Box>
         </Container>
     );

@@ -13,6 +13,8 @@ const userRoutes_1 = __importDefault(require("./routes/userRoutes"));
 const authRoutes_1 = __importDefault(require("./routes/authRoutes"));
 const surveyRoutes_1 = __importDefault(require("./routes/surveyRoutes"));
 const businessRoutes_1 = __importDefault(require("./routes/businessRoutes"));
+const dashboardRoutes_1 = __importDefault(require("./routes/dashboardRoutes"));
+const businessSurveyRoutes_1 = __importDefault(require("./routes/businessSurveyRoutes"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 exports.app = app;
@@ -59,9 +61,19 @@ app.use('/api/users', userRoutes_1.default);
 app.use('/api/auth', authRoutes_1.default);
 app.use('/api/surveys', surveyRoutes_1.default);
 app.use('/api/businesses', businessRoutes_1.default);
+app.use('/api/business', businessSurveyRoutes_1.default);
+app.use('/api', dashboardRoutes_1.default);
 // Base route
 app.get('/', (req, res) => {
     res.json({ message: 'API is running...' });
+});
+// Ping endpoint - bağlantı testi için
+app.get('/api/ping', (req, res) => {
+    res.status(200).json({ message: 'Pong!', timestamp: new Date().toISOString() });
+});
+// Test endpoint
+app.get('/api/test', (req, res) => {
+    res.status(200).json({ message: 'Test başarılı!', timestamp: new Date().toISOString() });
 });
 // Error handling middleware
 app.use((err, req, res, next) => {

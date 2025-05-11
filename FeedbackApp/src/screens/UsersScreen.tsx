@@ -13,6 +13,7 @@ import {
     KeyboardAvoidingView,
     Platform
 } from 'react-native';
+// @ts-ignore
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthContext } from '../context/AuthContext';
 import api from '../services/api';

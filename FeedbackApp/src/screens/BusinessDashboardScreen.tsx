@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, RefreshControl, ScrollView, FlatList, Modal, TextInput } from 'react-native';
 // @ts-ignore
 import { Ionicons } from '@expo/vector-icons';
@@ -6,6 +6,7 @@ import { useAuthContext } from '../context/AuthContext';
 // @ts-ignore
 import { StackNavigationProp } from '@react-navigation/stack';
 import api from '../services/api';
+import { UserRole } from '../types/UserRole';
 
 // Navigation prop type
 interface NavigationProps {
@@ -60,319 +61,445 @@ const BusinessDashboardScreen: React.FC<NavigationProps> = ({ navigation }) => {
     // API bağlantısını test et
     const testApiConnection = async () => {
         try {
-            // API bağlantısını test et
+            console.log("API bağlantı testi başlatılıyor...");
+
+            // Önce API sağlık durumunu kontrol et
+            const healthStatus = api.getApiHealthStatus();
+
+            // Son 60 saniye içinde kontrol edilmişse ve sağlıklıysa, tekrar kontrol etmeye gerek yok
+            if (healthStatus.isHealthy && (Date.now() - healthStatus.lastChecked) < 60000) {
+                console.log("API bağlantısı iyi durumda (önbellekten):", healthStatus.message);
+                setIsConnected(true);
+                setError('');
+                return true;
+            }
+
+            // API servisi üzerinden test et
             const result = await api.testConnection();
             console.log("API bağlantı testi sonucu:", result);
             setIsConnected(result.success);
+
+            // Sonucu kullanıcıya bildirmek için error state'i güncelle
+            if (!result.success) {
+                setError(`API sunucusuna bağlanılamadı. ${result.message || 'Lütfen internet bağlantınızı kontrol edin.'}`);
+            } else {
+                // Bağlantı başarılı ise error state'i temizle
+                setError('');
+            }
+
             return result.success;
-        } catch (err) {
+        } catch (err: any) {
             console.error("API bağlantı testi hatası:", err);
             setIsConnected(false);
+            setError(`Sunucu bağlantısı kurulamadı: ${err.message || 'Bilinmeyen hata'}. Lütfen daha sonra tekrar deneyin.`);
             return false;
         }
     };
 
-    // Direkt olarak işletmeye özel anketleri getir
-    const fetchBusinessSurveys = async (businessId: string) => {
-        if (!token) return [];
-
-        console.log("İşletme anketleri getiriliyor. BusinessID:", businessId);
-
-        // 1. İşletmeye özel endpoint denemeleri
-        const businessEndpoints = [
-            `/api/businesses/${businessId}/surveys`,
-            `/api/business/${businessId}/surveys`,
-            `/api/business/${businessId}/feedbacks`,
-            `/api/surveys/business/${businessId}`
-        ];
-
-        // İşletmeye özel endpointleri dene
-        for (const endpoint of businessEndpoints) {
-            try {
-                console.log(`İşletmeye özel endpoint deneniyor: ${endpoint}`);
-                const response = await fetch(`${api.getApiUrl()}${endpoint}`, {
-                    method: 'GET',
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    const surveys = Array.isArray(data) ? data : (data.data || data.surveys || []);
-                    console.log(`${endpoint} başarılı, ${surveys.length} anket bulundu`);
-                    return surveys;
-                } else {
-                    console.warn(`${endpoint} başarısız, durum kodu:`, response.status);
-                }
-            } catch (err) {
-                console.warn(`${endpoint} hatası:`, err);
-            }
-        }
-
-        // 2. Genel anket endpointlerini dene ve filtreleme yap
-        const surveys = await fetchAllSurveys();
-
-        // İşletmeye ait anketleri filtrele
-        if (Array.isArray(surveys) && surveys.length > 0) {
-            console.log("Toplam anket sayısı (tüm sistem):", surveys.length);
-            console.log("İşletme ID'sine göre filtreleme yapılıyor:", businessId);
-
-            const businessSurveys = surveys.filter(survey => {
-                // Business ID'yi tespit et
-                let surveyBusinessId = null;
-
-                if (survey.businessId) {
-                    surveyBusinessId = survey.businessId;
-                } else if (typeof survey.business === 'string') {
-                    surveyBusinessId = survey.business;
-                } else if (survey.business && typeof survey.business === 'object' && survey.business._id) {
-                    surveyBusinessId = survey.business._id;
-                }
-
-                return surveyBusinessId === businessId;
-            });
-
-            console.log(`Filtreleme sonucu ${businessSurveys.length} anket bulundu`);
-            return businessSurveys;
-        }
-
-        // Hiç anket bulunamadı, test verisi döndür
-        console.log("Hiçbir anket bulunamadı, test verisi döndürülüyor");
-        return [
-            {
-                _id: `test_survey_1_${businessId}`,
-                title: 'Müşteri Memnuniyet Anketi',
-                description: 'Hizmet kalitemizi değerlendirin',
-                businessId: businessId,
-                business: businessId,
-                isActive: true,
-                createdAt: new Date().toISOString(),
-                questions: []
-            },
-            {
-                _id: `test_survey_2_${businessId}`,
-                title: 'Ürün Değerlendirme Anketi',
-                description: 'Yeni ürünlerimizi değerlendirin',
-                businessId: businessId,
-                business: businessId,
-                isActive: true,
-                createdAt: new Date().toISOString(),
-                questions: []
-            }
-        ];
-    };
-
-    // Tüm anketleri getir
-    const fetchAllSurveys = async () => {
-        // İlk olarak API üzerinden anket listesini al
-        let allSurveys = [];
-
-        if (!token) {
-            console.warn("Token olmadığı için API'ye istek yapılamıyor");
-            return [];
-        }
-
-        try {
-            console.log("İlk deneme: /api/surveys endpoint");
-            allSurveys = await api.getFeedbacks(token);
-            console.log("API yanıtı:", allSurveys);
-            return allSurveys;
-        } catch (directError: any) {
-            console.warn("Standart getFeedbacks fonksiyonu başarısız:", directError.message);
-
-            // Alternatif endpoint'leri art arda dene
-            const endpoints = [
-                '/api/surveys',
-                '/api/feedbacks',
-                '/api/feedback',
-                '/api/forms',
-                '/api/survey'
-            ];
-
-            // Her bir endpoint'i sırayla dene
-            for (const endpoint of endpoints) {
-                try {
-                    console.log(`${endpoint} endpoint deneniyor...`);
-                    const response = await fetch(`${api.getApiUrl()}${endpoint}`, {
-                        method: 'GET',
-                        headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Content-Type': 'application/json'
-                        }
-                    });
-
-                    if (response.ok) {
-                        const data = await response.json();
-                        allSurveys = Array.isArray(data) ? data : (data.data || []);
-                        console.log(`${endpoint} başarılı, veri:`, allSurveys.length);
-                        return allSurveys;
-                    } else {
-                        console.warn(`${endpoint} başarısız, durum kodu:`, response.status);
-                    }
-                } catch (endpointError) {
-                    console.warn(`${endpoint} hatası:`, endpointError);
-                }
-            }
-        }
-
-        console.log("Hiçbir endpoint çalışmadı, boş dizi döndürülüyor");
-        return [];
-    };
-
     const loadSurveys = async () => {
-        if (!token) return;
+        if (!token) {
+            setError('Oturum bilgisi bulunamadı. Lütfen tekrar giriş yapın.');
+            setIsLoading(false);
+            setRefreshing(false);
+            return;
+        }
 
         setIsLoading(true);
         setError('');
 
         try {
-            // Önce API bağlantısını test et
+            // API bağlantısını test et
+            console.log("Anket yükleme: API bağlantısı kontrol ediliyor...");
             const isApiConnected = await testApiConnection();
+
+            // API bağlantısı yoksa hata
             if (!isApiConnected) {
-                console.log("API bağlantısı kurulamadı");
-                setBusinessInfo({
-                    name: user?.name ? `${user.name} İşletmesi` : 'İşletme Paneli',
-                    address: 'API Bağlantısı Geçici Olarak Kullanılamıyor'
-                });
-
-                // Test için dummy veri göster
-                setSurveys([
-                    {
-                        _id: 'test_survey_1_offline',
-                        title: 'Çevrimdışı Test Anketi 1',
-                        description: 'API bağlantısı olmadığında gösterilen test anketi',
-                        businessId: 'offline',
-                        business: 'offline',
-                        isActive: true,
-                        createdAt: new Date().toISOString(),
-                        questions: []
-                    },
-                    {
-                        _id: 'test_survey_2_offline',
-                        title: 'Çevrimdışı Test Anketi 2',
-                        description: 'API bağlantısı olmadığında gösterilen test anketi',
-                        businessId: 'offline',
-                        business: 'offline',
-                        isActive: true,
-                        createdAt: new Date().toISOString(),
-                        questions: []
-                    }
-                ]);
-
-                setError("API sunucusuna bağlanılamıyor. Lütfen internet bağlantınızı kontrol edin.");
-                setIsLoading(false);
-                setRefreshing(false);
-                return;
+                console.log("API bağlantısı kurulamadı - işlem iptal ediliyor");
+                throw new Error("API sunucusuna bağlanılamadı. Lütfen internet bağlantınızı kontrol edin.");
             }
 
-            // Önce business ID bulmaya çalış
-            console.log("Kullanıcı profili getiriliyor...");
-            const userProfile = await api.getUserProfile(token);
-            console.log("Kullanıcı profili alındı:", userProfile);
+            // Kullanıcı profil bilgilerini al
+            let userProfile = null;
+            try {
+                // API servisi ile profil bilgisi alınamadıysa, kullanıcı objesini kullan
+                console.log("API servisi ile profil bilgisi alınıyor...");
+                userProfile = await api.getUserProfile(token);
+                console.log("API servisi ile profil bilgisi alındı:", userProfile);
+            } catch (profileError) {
+                console.warn("API servisi ile profil bilgisi alınamadı:", profileError);
 
-            // Business ID tespiti
+                // Profil null ise ve kullanıcı objesi varsa, kullanıcı bilgilerini kullan
+                if (user) {
+                    console.log("Profil verisi yerine kullanıcı verisi kullanılıyor");
+                    userProfile = { ...user };
+                } else {
+                    throw new Error("Kullanıcı profili alınamadı. Lütfen tekrar giriş yapın.");
+                }
+            }
+
+            // İş mantığı, veri yapısını konsola yazdır (sorun tespiti için)
+            console.log("Kullanıcı profili veri yapısı:", JSON.stringify(userProfile, null, 2));
+
+            // Tüm olası Business ID alanlarını kontrol et
             let businessId = null;
-            if (userProfile.businessId) {
+            let businessInfoObj = null;
+
+            // Doğrudan businessId alanını kontrol et
+            if (userProfile?.businessId) {
                 businessId = userProfile.businessId;
                 console.log("İşletme ID profil nesnesinden alındı:", businessId);
-            } else if (userProfile.business && typeof userProfile.business === 'string') {
+            }
+            // business alanını kontrol et (string olabilir)
+            else if (userProfile?.business && typeof userProfile.business === 'string') {
                 businessId = userProfile.business;
                 console.log("İşletme ID string olarak business alanından alındı:", businessId);
-            } else if (userProfile.business && typeof userProfile.business === 'object' && userProfile.business._id) {
-                businessId = userProfile.business._id;
-                setBusinessInfo(userProfile.business);
-                console.log("İşletme ID ve bilgileri business nesnesinden alındı:", businessId);
-            } else if (userProfile.businessData && userProfile.businessData._id) {
-                businessId = userProfile.businessData._id;
-                setBusinessInfo(userProfile.businessData);
-                console.log("İşletme ID ve bilgileri businessData nesnesinden alındı:", businessId);
+            }
+            // business alanı obje olabilir
+            else if (userProfile?.business && typeof userProfile.business === 'object') {
+                // business._id kontrol et
+                if (userProfile.business._id) {
+                    businessId = userProfile.business._id;
+                    businessInfoObj = userProfile.business;
+                    console.log("İşletme ID ve bilgileri business nesnesinden alındı:", businessId);
+                }
+                // business.id kontrol et (bazı API'ler id kullanabilir)
+                else if (userProfile.business.id) {
+                    businessId = userProfile.business.id;
+                    businessInfoObj = userProfile.business;
+                    console.log("İşletme ID (id) ve bilgileri business nesnesinden alındı:", businessId);
+                }
+            }
+            // Diğer olası alanları kontrol et
+            else if (userProfile?.businessData && typeof userProfile.businessData === 'object') {
+                if (userProfile.businessData._id) {
+                    businessId = userProfile.businessData._id;
+                    businessInfoObj = userProfile.businessData;
+                }
+                else if (userProfile.businessData.id) {
+                    businessId = userProfile.businessData.id;
+                    businessInfoObj = userProfile.businessData;
+                }
+            }
+            // data alanında business veya işletme bilgisi olabilir
+            else if (userProfile?.data) {
+                if (userProfile.data.business) {
+                    const dataBusiness = userProfile.data.business;
+                    if (typeof dataBusiness === 'string') {
+                        businessId = dataBusiness;
+                    } else if (typeof dataBusiness === 'object' && (dataBusiness._id || dataBusiness.id)) {
+                        businessId = dataBusiness._id || dataBusiness.id;
+                        businessInfoObj = dataBusiness;
+                    }
+                } else if (userProfile.data.businessId) {
+                    businessId = userProfile.data.businessId;
+                }
+            }
+
+            // Role göre business ID alanlarını kontrol et
+            if (!businessId && userProfile?.role === UserRole.BUSINESS_ADMIN) {
+                // BUSINESS_ADMIN rolü için özel alanlar kontrol et
+                if (userProfile.companyId) {
+                    businessId = userProfile.companyId;
+                }
+                else if (userProfile.managedBusinessId) {
+                    businessId = userProfile.managedBusinessId;
+                }
+                else if (userProfile.workplaceId) {
+                    businessId = userProfile.workplaceId;
+                }
+                else if (userProfile.company) {
+                    if (typeof userProfile.company === 'string') {
+                        businessId = userProfile.company;
+                    } else if (typeof userProfile.company === 'object' && (userProfile.company._id || userProfile.company.id)) {
+                        businessId = userProfile.company._id || userProfile.company.id;
+                        businessInfoObj = userProfile.company;
+                    }
+                }
+            }
+
+            // Kullanıcının rolüne bakarak varsayılan bir işletme ID'si oluştur
+            if (!businessId && user) {
+                if (user.role === UserRole.BUSINESS_ADMIN) {
+                    // Kullanıcı ID'sinden bir işletme ID'si oluştur
+                    businessId = `business_${user._id || user.id || Date.now().toString()}`;
+                    businessInfoObj = {
+                        _id: businessId,
+                        name: user.name ? `${user.name} İşletmesi` : 'İşletme',
+                        isActive: true,
+                        createdAt: new Date().toISOString()
+                    };
+                    console.log("Kullanıcı bazlı varsayılan işletme ID oluşturuldu:", businessId);
+                } else if (user.role === UserRole.SUPER_ADMIN) {
+                    // SUPER_ADMIN için
+                    businessId = 'admin';
+                    businessInfoObj = {
+                        _id: 'admin',
+                        name: 'Sistem Yöneticisi',
+                        isActive: true
+                    };
+                } else {
+                    // Genel müşteri için varsayılan ID
+                    businessId = `customer_${user._id || user.id || Date.now().toString()}`;
+                    businessInfoObj = {
+                        _id: businessId,
+                        name: 'Müşteri Görünümü',
+                        isActive: true
+                    };
+                }
             }
 
             if (!businessId) {
                 console.warn("İşletme ID bulunamadı");
-                // Bir hata göster
                 setError("İşletme bilgisi bulunamadı. Lütfen sistem yöneticisiyle iletişime geçin.");
-                setSurveys([]);
                 setIsLoading(false);
                 setRefreshing(false);
                 return;
             }
 
-            // İşletme bilgisi henüz alınmadıysa
-            if (!businessInfo) {
+            // İşletme bilgisini ayarla
+            if (businessInfoObj) {
+                setBusinessInfo(businessInfoObj);
+            }
+            // İşletme bilgisi henüz alınmadıysa ve başka bir ID varsa
+            else if (businessId) {
                 try {
                     console.log("İşletme detayları getiriliyor...");
                     const business = await api.getBusiness(token, businessId);
                     console.log("İşletme detayları alındı:", business);
-                    setBusinessInfo(business);
+
+                    // API yanıtını kontrol et
+                    if (business && (business.data || business.name)) {
+                        setBusinessInfo(business.data || business);
+                    } else {
+                        console.warn('Eksik işletme bilgisi:', business);
+                        // Basit bilgi oluştur
+                        setBusinessInfo({
+                            _id: businessId,
+                            name: user?.name ? `${user.name} İşletmesi` : 'İşletme',
+                            isActive: true
+                        });
+                    }
                 } catch (err) {
                     console.warn('İşletme detayları alınamadı', err);
+                    // Hata durumunda basit bir işletme nesnesi oluştur
+                    setBusinessInfo({
+                        _id: businessId,
+                        name: user?.name ? `${user.name} İşletmesi` : 'İşletme',
+                        isActive: true
+                    });
                 }
             }
 
+            // İşletmeye ait anketleri getir
             try {
-                // Direkt olarak işletmeye özel anketleri getir
                 if (businessId) {
+                    console.log(`İşletme anketleri yükleniyor... Business ID: ${businessId}`);
+
+                    // fetchBusinessSurveys çağrısı
                     const businessSurveys = await fetchBusinessSurveys(businessId);
-                    setSurveys(businessSurveys);
-                    console.log(`Toplam ${businessSurveys.length} anket bulundu ve gösteriliyor`);
+
+                    if (businessSurveys && businessSurveys.length > 0) {
+                        // API'den alınan tüm anketleri göster
+                        setSurveys(businessSurveys);
+                        console.log(`${businessSurveys.length} anket gösteriliyor`);
+                        // Veri alındı, herhangi bir hata varsa temizle
+                        setError('');
+                    } else {
+                        console.log("Hiç anket bulunamadı");
+                        setSurveys([]);
+                        setError('Henüz anket eklenmemiş. Yeni anket oluşturabilirsiniz.');
+                    }
                 } else {
                     console.warn("Business ID null olduğu için anket getirilemedi");
                     setSurveys([]);
+                    setError('İşletme bilgisi bulunamadı. Lütfen sistem yöneticisiyle iletişime geçin.');
                 }
             } catch (surveyError: any) {
                 console.error("Anket verisi alınamadı:", surveyError);
 
-                // Hata mesajında 404 varsa, API endpoint'i yok demektir
-                if (surveyError.toString().includes('404')) {
-                    console.log("404 hatası alındı - API endpoint'i mevcut değil");
-                    setError("Anket verisi şu anda kullanılamıyor. Sisteme henüz anket eklenmemiş olabilir.");
+                let errorMessage = "Anket verisi alınamadı: ";
+
+                if (surveyError.response?.status === 404 || surveyError.message?.includes('404')) {
+                    errorMessage = "Anket API endpointleri bulunamadı. Veriler alınamıyor.";
+                } else if (surveyError.message?.includes('timeout') || surveyError.code === 'ECONNABORTED') {
+                    errorMessage = "Anket verileri alınırken zaman aşımı oluştu. Lütfen daha sonra tekrar deneyin.";
+                } else if (surveyError.message?.includes('Network')) {
+                    errorMessage = "Ağ hatası. İnternet bağlantınızı kontrol edin.";
                 } else {
-                    setError("Anket verisi alınamadı. Lütfen daha sonra tekrar deneyin.");
+                    errorMessage += surveyError.message || 'Bilinmeyen hata';
                 }
 
-                // Test verileri göster
-                const testSurveys = [
-                    {
-                        _id: `test_survey_1_${businessId}`,
-                        title: 'Hata Durumu Test Anketi 1',
-                        description: 'API hatası durumunda gösterilen test anketi',
-                        businessId: businessId,
-                        business: businessId,
-                        isActive: true,
-                        createdAt: new Date().toISOString(),
-                        questions: []
-                    },
-                    {
-                        _id: `test_survey_2_${businessId}`,
-                        title: 'Hata Durumu Test Anketi 2',
-                        description: 'API hatası durumunda gösterilen test anketi',
-                        businessId: businessId,
-                        business: businessId,
-                        isActive: true,
-                        createdAt: new Date().toISOString(),
-                        questions: []
-                    }
-                ];
-                setSurveys(testSurveys);
+                setError(errorMessage);
+                setSurveys([]);
             }
         } catch (err: any) {
-            console.error('Veri yükleme hatası:', err);
-            setError('Veriler yüklenirken bir hata oluştu. Lütfen daha sonra tekrar deneyin.');
-            // Hata durumunda boş liste
+            console.error("Genel bir hata oluştu:", err);
+            setError(`${err.message || 'Beklenmeyen bir hata oluştu'}`);
             setSurveys([]);
-
-            if (!businessInfo) {
-                setBusinessInfo({
-                    name: user?.name ? `${user.name} İşletmesi` : 'İşletme Paneli',
-                    address: 'Bağlantı Hatası'
-                });
-            }
         } finally {
             setIsLoading(false);
             setRefreshing(false);
+        }
+    };
+
+    // Direkt olarak işletmeye özel anketleri getir
+    const fetchBusinessSurveys = async (businessId: string) => {
+        if (!token) {
+            setError("Oturum bilgisi bulunamadı. Lütfen tekrar giriş yapın.");
+            return [];
+        }
+
+        console.log("İşletme anketleri getiriliyor. BusinessID:", businessId);
+
+        try {
+            // API bağlantısını doğrudan kontrol et
+            const isConnected = await testApiConnection();
+            if (!isConnected) {
+                throw new Error("API sunucusuna bağlanılamadı. Lütfen internet bağlantınızı kontrol edin.");
+            }
+
+            // İşletmeye özel endpoint denemeleri
+            const businessEndpoints = [
+                `/api/businesses/${businessId}/surveys`,
+                `/api/business/${businessId}/surveys`,
+                `/api/surveys/business/${businessId}`
+            ];
+
+            // Endpointleri deneme sonuçlarını takip et
+            let lastError = null;
+            let attemptedEndpoints = 0;
+
+            // Her bir endpoint'i sırayla dene
+            for (const endpoint of businessEndpoints) {
+                try {
+                    console.log(`İşletmeye özel endpoint deneniyor: ${endpoint}`);
+                    attemptedEndpoints++;
+
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+                    const response = await fetch(`${api.getApiUrl()}${endpoint}`, {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        },
+                        signal: controller.signal
+                    });
+
+                    clearTimeout(timeoutId);
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        const surveys = Array.isArray(data) ? data : (data.data || data.surveys || data.items || data.results || []);
+                        console.log(`${endpoint} başarılı, ${surveys.length} anket bulundu`);
+
+                        if (surveys.length > 0) {
+                            return surveys;
+                        }
+                    } else {
+                        const errorText = `${endpoint} başarısız, durum kodu: ${response.status}`;
+                        console.warn(errorText);
+                        lastError = new Error(errorText);
+
+                        // 404 hatası loglama için özel durum
+                        if (response.status === 404) {
+                            console.log(`Endpoint bulunamadı (404): ${endpoint}`);
+                        }
+                    }
+                } catch (err: any) {
+                    console.warn(`${endpoint} hatası:`, err);
+                    lastError = err;
+
+                    // Timeout veya ağ hatası durumunda daha detaylı bilgi
+                    if (err.name === 'AbortError') {
+                        console.log(`Endpoint zaman aşımı: ${endpoint}`);
+                    } else if (err.message?.includes('Network') || err.message?.includes('network')) {
+                        console.log(`Ağ hatası: ${endpoint}`);
+                    }
+                }
+            }
+
+            console.log(`${attemptedEndpoints} işletme endpointi denendi, şimdi genel anket API'si deneniyor`);
+
+            // Standart API çağrısı ile dene
+            try {
+                console.log("API servisi üzerinden anketleri alıyorum...");
+                const apiSurveys = await api.getFeedbacks(token);
+
+                if (apiSurveys && apiSurveys.data && Array.isArray(apiSurveys.data)) {
+                    console.log(`API servisi ${apiSurveys.data.length} anket döndürdü, işletmeye göre filtreleniyor...`);
+
+                    // Veriyi normalize et
+                    const normalizedSurveys = apiSurveys.data;
+
+                    // İşletmeye göre filtrele
+                    const businessSurveys = normalizedSurveys.filter((survey: Survey) => {
+                        let surveyBusinessId = survey.businessId ||
+                            (typeof survey.business === 'string' ? survey.business :
+                                (survey.business && typeof survey.business === 'object' ? survey.business._id : null));
+
+                        // SUPER_ADMIN rolü varsa tüm anketleri göster
+                        if (user?.role === UserRole.SUPER_ADMIN) return true;
+
+                        return surveyBusinessId === businessId;
+                    });
+
+                    console.log(`Filtreleme sonrası ${businessSurveys.length} anket bulundu`);
+
+                    if (businessSurveys.length > 0) {
+                        return businessSurveys;
+                    }
+                } else if (Array.isArray(apiSurveys)) {
+                    // Doğrudan dizi döndüyse
+                    console.log(`API servisi ${apiSurveys.length} anket döndürdü, işletmeye göre filtreleniyor...`);
+
+                    // İşletmeye göre filtrele
+                    const businessSurveys = apiSurveys.filter((survey: Survey) => {
+                        let surveyBusinessId = survey.businessId ||
+                            (typeof survey.business === 'string' ? survey.business :
+                                (survey.business && typeof survey.business === 'object' ? survey.business._id : null));
+
+                        // SUPER_ADMIN rolü varsa tüm anketleri göster
+                        if (user?.role === UserRole.SUPER_ADMIN) return true;
+
+                        return surveyBusinessId === businessId;
+                    });
+
+                    console.log(`Filtreleme sonrası ${businessSurveys.length} anket bulundu`);
+
+                    if (businessSurveys.length > 0) {
+                        return businessSurveys;
+                    }
+                }
+
+                // Anket bulunamadı ama API çalışıyor - boş dizi döndür
+                console.log("API çalışıyor ama bu işletmeye ait anket bulunamadı");
+                setError("Bu işletmeye ait anket bulunamadı. Yeni anket oluşturabilirsiniz.");
+                return [];
+            } catch (error: any) {
+                console.error("API servisi ile anket getirme hatası:", error);
+
+                // Hata türüne göre farklı mesajlar
+                if (error.response && error.response.status === 404) {
+                    setError("Anket API endpointi bulunamadı. Lütfen sistem yöneticisiyle iletişime geçin.");
+                } else if (error.message?.includes('timeout') || error.code === 'ECONNABORTED') {
+                    setError("Anket verileri alınırken zaman aşımı oluştu. Lütfen daha sonra tekrar deneyin.");
+                } else if (error.message?.includes('Network')) {
+                    setError("Ağ hatası. İnternet bağlantınızı kontrol edin.");
+                } else {
+                    setError(`Anket verileri alınamadı: ${error.message || 'Bilinmeyen hata'}`);
+                }
+
+                throw error; // Hata fırlat
+            }
+        } catch (error: any) {
+            console.error("İşletme anketleri getirilemedi:", error);
+            // Ana hata mesajını setError ile belirleme
+            if (!error.message?.includes("API")) { // Eğer önceki catch bloğunda belirlenmediyse
+                setError(`İşletme anketleri yüklenemedi: ${error.message || 'Bilinmeyen hata'}`);
+            }
+            return []; // Boş dizi döndür
         }
     };
 
@@ -997,6 +1124,12 @@ const BusinessDashboardScreen: React.FC<NavigationProps> = ({ navigation }) => {
                     <View style={styles.errorContainer}>
                         <Ionicons name="alert-circle" size={32} color="#e74c3c" />
                         <Text style={styles.errorText}>{error}</Text>
+                        <TouchableOpacity
+                            style={styles.retryButton}
+                            onPress={onRefresh}
+                        >
+                            <Text style={styles.retryButtonText}>Yeniden Dene</Text>
+                        </TouchableOpacity>
                     </View>
                 ) : null}
 
@@ -1054,6 +1187,12 @@ const BusinessDashboardScreen: React.FC<NavigationProps> = ({ navigation }) => {
                             <View style={styles.emptyContainer}>
                                 <Ionicons name="document-text-outline" size={48} color="#bdc3c7" />
                                 <Text style={styles.emptyText}>Henüz anket bulunmuyor</Text>
+                                <TouchableOpacity
+                                    style={styles.emptyCreateButton}
+                                    onPress={handleCreateSurvey}
+                                >
+                                    <Text style={styles.emptyCreateButtonText}>Yeni Anket Oluştur</Text>
+                                </TouchableOpacity>
                             </View>
                         ) : (
                             <>
@@ -1305,10 +1444,10 @@ const styles = StyleSheet.create({
         marginBottom: 8,
     },
     retryButton: {
-        backgroundColor: '#e74c3c',
-        padding: 8,
-        borderRadius: 4,
-        alignItems: 'center',
+        backgroundColor: '#3498db',
+        padding: 10,
+        borderRadius: 5,
+        marginTop: 10,
     },
     retryButtonText: {
         color: 'white',
@@ -1529,6 +1668,16 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: 'bold',
         marginLeft: 10,
+    },
+    emptyCreateButton: {
+        backgroundColor: '#2ecc71',
+        padding: 12,
+        borderRadius: 8,
+        marginTop: 16,
+    },
+    emptyCreateButtonText: {
+        color: 'white',
+        fontWeight: 'bold',
     },
 });
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -25,6 +25,7 @@ import SurveyByCodePage from './pages/SurveyByCodePage';
 import PublicSurveyPage from './pages/PublicSurveyPage';
 import SurveyDetails from './pages/SurveyDetails';
 import EditSurvey from './pages/EditSurvey';
+import BusinessResponses from './pages/BusinessResponses';
 
 // Korumalı rotalar için bileşen
 const ProtectedRoute = ({
@@ -35,6 +36,16 @@ const ProtectedRoute = ({
   allowedRoles?: UserRole[]
 }) => {
   const { isAuthenticated, user } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    // Check if user needs business configuration and is trying to access business routes
+    if (user?.needsBusinessConfig && location.pathname.includes('/business/')) {
+      console.log('Kullanıcı işletme ayarlarına ihtiyaç duyuyor, DevTools sayfasına yönlendiriliyor');
+      navigate('/dev-tools');
+    }
+  }, [user, location.pathname, navigate]);
 
   if (!isAuthenticated) {
     // Oturum açılmamışsa login sayfasına yönlendir
@@ -45,6 +56,15 @@ const ProtectedRoute = ({
   if (allowedRoles && (!user || !allowedRoles.includes(user.role))) {
     // Kullanıcının rolü yetkili değilse ana sayfaya yönlendir
     return <Navigate to="/" replace />;
+  }
+
+  // Business Admin trying to access business pages without a business ID
+  if (user?.role === UserRole.BUSINESS_ADMIN &&
+    !user.business &&
+    location.pathname.includes('/business/') &&
+    !location.pathname.includes('/dev-tools')) {
+    console.log('BUSINESS_ADMIN without business ID trying to access business routes');
+    return <Navigate to="/dev-tools" replace />;
   }
 
   return <>{children}</>;
@@ -88,13 +108,27 @@ const AppRoutes = () => {
 
   // Sadece başlangıçta ve kritik durum değişikliklerinde log
   useEffect(() => {
-    console.log('Auth değişti:', { isAuthenticated, userRole: user?.role });
-  }, [isAuthenticated, user?.role]);
+    console.log('Auth değişti:', {
+      isAuthenticated,
+      userRole: user?.role,
+      hasBusiness: !!user?.business,
+      needsConfig: user?.needsBusinessConfig
+    });
+  }, [isAuthenticated, user?.role, user?.business, user?.needsBusinessConfig]);
 
   // Sayfa değişikliklerini sadece log amaçlı takip et
   useEffect(() => {
     console.log('Sayfa değişti:', location.pathname);
-  }, [location.pathname]);
+
+    // Check if a BUSINESS_ADMIN is navigating to a business page without a business ID
+    if (user?.role === UserRole.BUSINESS_ADMIN &&
+      !user.business &&
+      location.pathname.includes('/business/') &&
+      !location.pathname.includes('/dev-tools')) {
+      console.log('Redirecting to DevTools for business setup');
+      // We don't need to navigate here as the ProtectedRoute component will handle it
+    }
+  }, [location.pathname, user]);
 
   // Oturum açma durumunu takip et ve sonsuz döngüleri önle
   useEffect(() => {
@@ -120,6 +154,25 @@ const AppRoutes = () => {
       {/* QR Code ile anket erişim rotası */}
       <Route path="/survey/code/:code" element={<SurveyByCodePage />} />
       <Route path="/survey/:id" element={<PublicSurveyPage />} />
+
+      {/* İşletme yanıtları görüntüleme sayfaları */}
+      <Route
+        path="/business/:businessId/responses"
+        element={
+          <ProtectedRoute allowedRoles={[UserRole.BUSINESS_ADMIN, UserRole.SUPER_ADMIN]}>
+            <BusinessResponses />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/survey/:surveyId/responses"
+        element={
+          <ProtectedRoute allowedRoles={[UserRole.BUSINESS_ADMIN, UserRole.SUPER_ADMIN]}>
+            <BusinessResponses />
+          </ProtectedRoute>
+        }
+      />
 
       {/* Development Tools */}
       <Route
@@ -285,13 +338,13 @@ const App: React.FC = () => {
   return (
     <Router>
       <AuthProvider>
-      <ThemeProvider theme={theme}>
+        <ThemeProvider theme={theme}>
           <SnackbarProvider>
-        <CssBaseline />
-          <AppRoutes />
+            <CssBaseline />
+            <AppRoutes />
           </SnackbarProvider>
         </ThemeProvider>
-        </AuthProvider>
+      </AuthProvider>
     </Router>
   );
 };

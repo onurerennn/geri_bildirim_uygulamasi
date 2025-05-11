@@ -64,7 +64,7 @@ export const businessService = {
             }
 
             // İsteği gönder
-            const response = await api.get('/api/businesses', {
+            const response = await api.get('/businesses', {
                 headers: {
                     Authorization: `Bearer ${token}`
                 }
@@ -118,7 +118,7 @@ export const businessService = {
             }
 
             console.log(`İşletme detayı getiriliyor (ID: ${id})...`);
-            const response = await api.get(`/api/businesses/${id}`, {
+            const response = await api.get(`/businesses/${id}`, {
                 headers: {
                     Authorization: `Bearer ${token}`
                 }
@@ -145,7 +145,7 @@ export const businessService = {
             }
 
             // API isteği gönder
-            const response = await api.post('/api/businesses', data, {
+            const response = await api.post('/businesses', data, {
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`
@@ -185,7 +185,7 @@ export const businessService = {
             }
 
             console.log(`İşletme güncelleniyor (ID: ${id}):`, data);
-            const response = await api.put(`/api/businesses/${id}`, data, {
+            const response = await api.put(`/businesses/${id}`, data, {
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`
@@ -208,7 +208,7 @@ export const businessService = {
             }
 
             console.log(`İşletme siliniyor (ID: ${id})...`);
-            await api.delete(`/api/businesses/${id}`, {
+            await api.delete(`/businesses/${id}`, {
                 headers: {
                     'Authorization': `Bearer ${token}`
                 }
@@ -229,7 +229,7 @@ export const businessService = {
             }
 
             console.log(`İşletme onaylanıyor (ID: ${id})...`);
-            const response = await api.post(`/api/businesses/${id}/approve`, {}, {
+            const response = await api.post(`/businesses/${id}/approve`, {}, {
                 headers: {
                     'Authorization': `Bearer ${token}`
                 }
@@ -255,7 +255,7 @@ export const businessService = {
                 throw new Error('Yetkilendirme hatası: Lütfen tekrar giriş yapın');
             }
 
-            const response = await api.post(`/api/businesses/${businessId}/admin`, data, {
+            const response = await api.post(`/businesses/${businessId}/admin`, data, {
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`

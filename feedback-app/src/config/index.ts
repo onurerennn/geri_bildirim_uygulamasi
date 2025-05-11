@@ -1,6 +1,8 @@
 // Configuration constants
 // Using the same IP address as mobile app for consistency
-export const API_URL = 'http://172.20.10.2:5001/api';
+export const API_URL = process.env.NODE_ENV === 'development'
+    ? 'http://localhost:5000/api'         // For local development
+    : 'http://172.20.10.2:5000/api';      // For production/testing
 
 // Application information
 export const APP_NAME = 'Geri Bildirim';

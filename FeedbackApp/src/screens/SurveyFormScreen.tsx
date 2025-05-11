@@ -1,19 +1,26 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, Alert } from 'react-native';
+// @ts-ignore 
 import { Ionicons } from '@expo/vector-icons';
 import { StackNavigationProp } from '@react-navigation/stack';
-import api from '../services/api';
+import { RouteProp } from '@react-navigation/native';
+import apiService from '../services/api';
 import { Rating } from 'react-native-ratings';
+import { AuthContext, AuthContextType } from '../context/AuthContext';
 
-interface NavigationProps {
-    navigation: StackNavigationProp<any, any>;
-    route: {
-        params: {
-            surveyId: string;
-            code?: string;
-        };
-    };
-}
+type CustomerStackParamList = {
+    CustomerTabs: undefined;
+    SurveyForm: { surveyId: string; code?: string };
+    Home: undefined;
+};
+
+type SurveyFormScreenNavigationProp = StackNavigationProp<CustomerStackParamList, 'SurveyForm'>;
+type SurveyFormScreenRouteProp = RouteProp<CustomerStackParamList, 'SurveyForm'>;
+
+type Props = {
+    navigation: SurveyFormScreenNavigationProp;
+    route: SurveyFormScreenRouteProp;
+};
 
 interface Question {
     _id: string;
@@ -37,7 +44,8 @@ interface Answer {
     value: string | number;
 }
 
-const SurveyFormScreen: React.FC<NavigationProps> = ({ navigation, route }) => {
+const SurveyFormScreen: React.FC<Props> = ({ navigation, route }) => {
+    const auth = useContext(AuthContext);
     const [survey, setSurvey] = useState<Survey | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
@@ -56,25 +64,22 @@ const SurveyFormScreen: React.FC<NavigationProps> = ({ navigation, route }) => {
             setIsLoading(true);
             setError('');
 
-            // Anket bilgilerini yükle
-            let endpoint = '';
+            if (!auth.userRole) {
+                throw new Error('Kullanıcı rolü bulunamadı');
+            }
+
+            let surveyData;
             if (code) {
                 // QR kodundan anket yükleme
-                endpoint = `${api.getApiUrl()}/api/surveys/code/${code}`;
+                const response = await apiService.surveys.getByCode(code);
+                surveyData = response.data;
             } else if (surveyId) {
                 // Survey ID'den anket yükleme
-                endpoint = `${api.getApiUrl()}/api/surveys/${surveyId}`;
+                const response = await apiService.surveys.getById(surveyId, auth.userRole);
+                surveyData = response.data;
             } else {
                 throw new Error('Anket bilgisi bulunamadı');
             }
-
-            const response = await fetch(endpoint);
-
-            if (!response.ok) {
-                throw new Error(`Anket yüklenemedi: ${response.status}`);
-            }
-
-            const surveyData = await response.json();
 
             if (!surveyData.questions || !Array.isArray(surveyData.questions) || surveyData.questions.length === 0) {
                 throw new Error('Anket soruları bulunamadı');
@@ -150,21 +155,11 @@ const SurveyFormScreen: React.FC<NavigationProps> = ({ navigation, route }) => {
             }));
 
             // Cevapları gönder
-            const response = await fetch(`${api.getApiUrl()}/api/surveys/response`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    surveyId: survey._id,
-                    answers: formattedAnswers,
-                    code: code
-                })
+            await apiService.surveys.submitResponse(survey._id, {
+                surveyId: survey._id,
+                answers: formattedAnswers,
+                code: code
             });
-
-            if (!response.ok) {
-                throw new Error('Cevaplar gönderilemedi');
-            }
 
             // Başarılı
             setIsCompleted(true);
@@ -249,6 +244,11 @@ const SurveyFormScreen: React.FC<NavigationProps> = ({ navigation, route }) => {
         );
     };
 
+    // Navigation çağrılarını düzelt
+    const handleGoBack = () => {
+        navigation.navigate('CustomerTabs');
+    };
+
     if (isLoading) {
         return (
             <View style={styles.centered}>
@@ -289,7 +289,7 @@ const SurveyFormScreen: React.FC<NavigationProps> = ({ navigation, route }) => {
             <View style={styles.header}>
                 <TouchableOpacity
                     style={styles.backButton}
-                    onPress={() => navigation.goBack()}
+                    onPress={handleGoBack}
                 >
                     <Ionicons name="arrow-back" size={24} color="white" />
                 </TouchableOpacity>
