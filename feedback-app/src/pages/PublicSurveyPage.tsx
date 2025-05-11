@@ -4,12 +4,35 @@ import { Container, Box, CircularProgress, Typography, Alert, Button } from '@mu
 import PublicSurveyForm from '../components/PublicSurveyForm';
 import api from '../services/api';
 
+// Soru ve cevap tipleri tanımlayalım
+interface Question {
+    _id: string;
+    text: string;
+    required: boolean;
+    type: string;
+    options?: string[];
+}
+
+// PublicSurveyForm bileşeninde tanımlanan AnswerFormData tipine uyumlu olmalı
+interface AnswerFormData {
+    questionId: string;
+    value: string | number | boolean;
+}
+
+interface SurveyData {
+    _id: string;
+    title: string;
+    description: string;
+    questions: Question[];
+    isActive: boolean;
+}
+
 const PublicSurveyPage: React.FC = () => {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [survey, setSurvey] = useState<any>(null);
+    const [survey, setSurvey] = useState<SurveyData | null>(null);
     const [submitting, setSubmitting] = useState(false);
     const [submitted, setSubmitted] = useState(false);
 
@@ -30,14 +53,14 @@ const PublicSurveyPage: React.FC = () => {
                 setLoading(false);
             } catch (err: any) {
                 console.error('Anket yüklenirken hata oluştu:', err);
-                
+
                 let errorMessage = 'Anket yüklenirken bir hata oluştu';
                 if (err.response?.status === 404) {
                     errorMessage = 'Anket bulunamadı';
                 } else if (err.response?.data?.error) {
                     errorMessage = err.response.data.error;
                 }
-                
+
                 setError(errorMessage);
                 setLoading(false);
             }
@@ -46,26 +69,59 @@ const PublicSurveyPage: React.FC = () => {
         fetchSurvey();
     }, [id]);
 
-    const handleSubmit = async (answers: any[]) => {
+    const handleSubmit = async (formAnswers: AnswerFormData[]) => {
         try {
             setSubmitting(true);
-            
-            if (!answers.length) {
-                alert('Lütfen en az bir soruyu cevaplayın');
+            setError('');
+
+            if (!survey) {
+                setError('Anket bilgisi bulunamadı');
                 setSubmitting(false);
                 return;
             }
-            
-            await api.post(`/api/surveys/${survey._id}/responses`, {
+
+            // Verilen yanıtları kontrol et
+            if (!formAnswers.length) {
+                setError('Lütfen en az bir soruyu cevaplayın');
+                setSubmitting(false);
+                return;
+            }
+
+            // Tüm gerekli soruların cevaplandığından emin olalım
+            const unansweredRequired = survey.questions
+                .filter((q: Question) => q.required)
+                .filter((q: Question) => !formAnswers.some(a => a.questionId === q._id));
+
+            if (unansweredRequired.length > 0) {
+                setError(`Lütfen tüm zorunlu soruları cevaplayın: ${unansweredRequired.map((q: Question) => q.text).join(', ')}`);
+                setSubmitting(false);
+                return;
+            }
+
+            const response = {
                 surveyId: survey._id,
-                answers
-            });
-            
-            setSubmitted(true);
-            setSubmitting(false);
-        } catch (err: any) {
-            console.error('Anket gönderilirken hata oluştu:', err);
-            alert('Anket gönderilirken bir hata oluştu. Lütfen tekrar deneyin.');
+                answers: formAnswers
+            };
+
+            try {
+                await api.post(`/api/surveys/${survey._id}/responses`, response);
+                setSubmitted(true);
+            } catch (error: any) {
+                console.error('Yanıt gönderilirken hata oluştu:', error);
+
+                // Duplicate hatasını daha kullanıcı dostu şekilde göster
+                if (error.response?.data?.message?.includes('duplicate') ||
+                    error.message?.includes('duplicate') ||
+                    error.message?.includes('daha önce yanıt verdiniz')) {
+                    setError('Bu ankete daha önce yanıt verdiniz. Teşekkür ederiz!');
+                } else {
+                    setError(`Yanıt gönderilirken hata oluştu: ${error.message || 'Bilinmeyen hata'}`);
+                }
+            }
+        } catch (error: any) {
+            console.error('Form gönderilirken beklenmeyen hata:', error);
+            setError('Form gönderilirken beklenmeyen bir hata oluştu');
+        } finally {
             setSubmitting(false);
         }
     };
@@ -119,11 +175,11 @@ const PublicSurveyPage: React.FC = () => {
 
     return (
         <Container maxWidth="md" sx={{ mt: 8, mb: 8 }}>
-            <PublicSurveyForm
+            {survey && <PublicSurveyForm
                 survey={survey}
                 onSubmit={handleSubmit}
                 isSubmitting={submitting}
-            />
+            />}
         </Container>
     );
 };

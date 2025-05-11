@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput } from 'react-native';
+// @ts-ignore
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthContext } from '../context/AuthContext';
 import api from '../services/api';
@@ -73,79 +74,121 @@ const AdminDashboardScreen = ({ navigation }: any) => {
 
     // İstatistikleri yükle
     useEffect(() => {
-        const loadStats = async () => {
-            if (!token) return;
-
-            setIsLoading(true);
-            setError('');
-
-            try {
-                // API'den istatistikleri getir
-                try {
-                    const data = await api.getDashboardStats(token);
-                    setStats(data);
-                } catch (apiError: any) {
-                    console.error('İstatistik API hatası:', apiError);
-                    // Gerçek veri yerine dummy veri kullanmıyoruz, boş istatistikler gösteriyoruz
-                    setStats({
-                        totalSurveys: 0,
-                        activeSurveys: 0,
-                        totalResponses: 0,
-                        totalUsers: user?.role === UserRole.SUPER_ADMIN ? 0 : undefined,
-                        totalBusinesses: user?.role === UserRole.SUPER_ADMIN ? 0 : undefined
-                    });
-
-                    if (user?.role === UserRole.SUPER_ADMIN) {
-                        // Sadece hata durumunda kullanıcıya bildirim göster
-                        if (!error) {
-                            setError('İstatistikler yüklenirken bir hata oluştu. Verileri yenilemek için sayfayı çekin.');
-                        }
-                    }
-                }
-            } catch (err) {
-                console.error('İstatistik genel yükleme hatası:', err);
-                setError('İstatistikler yüklenirken bir hata oluştu');
-            } finally {
-                setIsLoading(false);
-            }
-        };
-
         loadStats();
     }, [token, user]);
 
-    // İşletmeleri yükle
-    useEffect(() => {
-        if (user?.role === UserRole.SUPER_ADMIN && token) {
-            loadBusinesses();
+    const loadStats = async () => {
+        if (!token) {
+            setError('Oturum bilgisi bulunamadı');
+            setIsLoading(false);
+            return;
         }
-    }, [token, user]);
 
-    // İşletmeleri yükle
-    const loadBusinesses = async () => {
+        setIsLoading(true);
+        setError('');
+
         try {
-            if (token) {
-                try {
-                    const response = await api.getBusinesses(token);
-                    if (Array.isArray(response) && response.length >= 0) {
-                        console.log(`İşletmeler başarıyla alındı (${response.length} adet)`);
-                        setBusinesses(response);
-                    } else {
-                        console.warn('İşletme verisi boş veya dizi değil:', response);
-                        setBusinesses([]); // Boş dizi ile başlat
-                    }
-                } catch (apiError: any) {
-                    console.error('İşletme yükleme API hatası:', apiError);
-                    if (apiError.response) {
-                        console.error('API Yanıt Kodu:', apiError.response.status);
-                        console.error('API Yanıt Verisi:', apiError.response.data);
-                    }
+            console.log('İstatistik verileri yükleniyor...');
 
-                    // Hata durumunda da boş dizi kullan, dummy veri kullanmıyoruz
-                    setBusinesses([]);
+            // İlk olarak işletmeleri yükle - SUPER_ADMIN için önemli bir veri kaynağı
+            if (user?.role === UserRole.SUPER_ADMIN) {
+                try {
+                    await loadBusinesses();
+                } catch (businessError) {
+                    console.error('İşletme verileri yüklenirken hata oluştu:', businessError);
                 }
             }
-        } catch (err) {
-            console.error('İşletme listesi yüklenirken hata:', err);
+
+            const statsResponse = await api.getDashboardStats(token);
+
+            if (statsResponse && statsResponse.success) {
+                console.log('İstatistik verileri alındı:', statsResponse);
+                setStats({
+                    totalSurveys: statsResponse.totalSurveys || 0,
+                    totalBusinesses: statsResponse.totalBusinesses || 0,
+                    totalUsers: statsResponse.totalUsers || 0,
+                    activeSurveys: statsResponse.activeSurveys || 0,
+                    totalResponses: statsResponse.totalResponses || 0
+                });
+                setError(''); // Başarılı durumda hatayı temizle
+            } else {
+                console.error('İstatistik API hatası:', statsResponse?.message || 'Bilinmeyen hata');
+                // Daha açıklayıcı bir hata mesajı
+                setError('İstatistik API erişilemez durumda. Veri alınamıyor.');
+                // Varsayılan değerleri kullan
+                setStats({
+                    totalSurveys: 0,
+                    totalBusinesses: 0,
+                    totalUsers: 0,
+                    activeSurveys: 0,
+                    totalResponses: 0
+                });
+            }
+        } catch (err: any) {
+            console.error('İstatistik yükleme hatası:', err);
+
+            // Hata türüne göre daha spesifik mesajlar
+            let errorMessage = 'İstatistik verileri alınamadı: ';
+
+            if (err.message?.includes('404') || err.response?.status === 404) {
+                errorMessage = 'İstatistik API endpointleri bulunamadı. Veriler alınamıyor.';
+            } else if (err.message?.includes('timeout') || err.code === 'ECONNABORTED') {
+                errorMessage = 'API yanıt süresi aşıldı. Lütfen internet bağlantınızı kontrol edin.';
+            } else if (err.message?.includes('Network Error')) {
+                errorMessage = 'Ağ bağlantı hatası. Lütfen internet bağlantınızı kontrol edin.';
+            } else {
+                errorMessage += err.message || 'Bilinmeyen hata';
+            }
+
+            setError(errorMessage);
+
+            // Hata durumunda varsayılan değerleri kullan
+            setStats({
+                totalSurveys: 0,
+                totalBusinesses: 0,
+                totalUsers: 0,
+                activeSurveys: 0,
+                totalResponses: 0
+            });
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    // İşletmeleri yükle - API'den gerçek veri alma
+    const loadBusinesses = async () => {
+        if (!token || user?.role !== UserRole.SUPER_ADMIN) {
+            return;
+        }
+
+        try {
+            const response = await api.getBusinesses(token);
+            if (Array.isArray(response) && response.length >= 0) {
+                console.log(`İşletmeler başarıyla alındı (${response.length} adet)`);
+                setBusinesses(response);
+            } else if (response && response.data && Array.isArray(response.data)) {
+                // Alternatif veri formatı kontrolü
+                console.log(`İşletmeler başarıyla alındı (${response.data.length} adet)`);
+                setBusinesses(response.data);
+            } else {
+                console.warn('İşletme verisi boş veya dizi değil:', response);
+                setBusinesses([]); // Boş dizi ile başlat
+            }
+        } catch (apiError: any) {
+            console.error('İşletme yükleme API hatası:', apiError);
+            let errorMessage = 'İşletme verileri yüklenemedi: ';
+
+            if (apiError.response?.status === 404 || apiError.message?.includes('404')) {
+                errorMessage += 'API endpointi bulunamadı.';
+            } else if (apiError.message?.includes('timeout') || apiError.code === 'ECONNABORTED') {
+                errorMessage += 'Zaman aşımı oluştu.';
+            } else if (apiError.message?.includes('Network Error')) {
+                errorMessage += 'Ağ bağlantı hatası.';
+            } else {
+                errorMessage += apiError.message || 'Bilinmeyen hata';
+            }
+
+            setError(errorMessage);
             setBusinesses([]);
         }
     };
@@ -358,18 +401,6 @@ const AdminDashboardScreen = ({ navigation }: any) => {
         );
     };
 
-    // İstatistikleri yeniden yükle
-    const loadStats = async () => {
-        if (!token) return;
-
-        try {
-            const data = await api.getDashboardStats(token);
-            setStats(data);
-        } catch (err) {
-            console.error('İstatistik yükleme hatası:', err);
-        }
-    };
-
     // İçerik yükleniyor göstergesi
     if (isLoading) {
         return (
@@ -496,7 +527,7 @@ const AdminDashboardScreen = ({ navigation }: any) => {
                     <View style={styles.adminButtonsContainer}>
                         <TouchableOpacity
                             style={styles.adminButton}
-                            onPress={() => navigation.navigate('Businesses')}
+                            onPress={() => navigation.navigate('BusinessScreen')}
                         >
                             <Ionicons name="business" size={24} color="white" style={styles.buttonIcon} />
                             <Text style={styles.buttonText}>İşletmeleri Yönet</Text>

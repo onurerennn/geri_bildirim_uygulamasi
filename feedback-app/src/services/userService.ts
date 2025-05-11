@@ -45,7 +45,7 @@ export const userService = {
                 throw new Error('Yetkilendirme hatası: Lütfen tekrar giriş yapın');
             }
 
-            const response = await api.get('/api/users', {
+            const response = await api.get('/users', {
                 headers: {
                     'Authorization': `Bearer ${token}`
                 }
@@ -78,21 +78,21 @@ export const userService = {
     },
 
     getUser: async (id: string): Promise<User> => {
-        const response = await api.get(`/api/users/${id}`);
+        const response = await api.get(`/users/${id}`);
         return response.data;
     },
 
     createUser: async (data: CreateUserData): Promise<User> => {
-        const response = await api.post('/api/users', data);
+        const response = await api.post('/users', data);
         return response.data;
     },
 
     updateUser: async (id: string, data: UpdateUserData): Promise<User> => {
-        const response = await api.put(`/api/users/${id}`, data);
+        const response = await api.put(`/users/${id}`, data);
         return response.data;
     },
 
     deleteUser: async (id: string): Promise<void> => {
-        await api.delete(`/api/users/${id}`);
+        await api.delete(`/users/${id}`);
     }
 }; 

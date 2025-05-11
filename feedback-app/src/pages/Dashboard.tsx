@@ -74,6 +74,9 @@ const SuperAdminDashboard = () => {
 
 const BusinessAdminDashboard = () => {
     const navigate = useNavigate();
+    const { user } = useAuth();
+    const businessId = user?.business;
+
     return (
         <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 16px' }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '24px', margin: '24px 0' }}>
@@ -91,6 +94,14 @@ const BusinessAdminDashboard = () => {
                         description="Anketleri oluştur, düzenle ve sonuçları görüntüle"
                         icon="📝"
                         onClick={() => navigate('/business/surveys')}
+                    />
+                </div>
+                <div style={{ flex: '1 1 300px', minWidth: '300px' }}>
+                    <DashboardCard
+                        title="Anket Yanıtları"
+                        description="Müşterilerin ankete verdiği yanıtları görüntüle"
+                        icon="📊"
+                        onClick={() => navigate(`/business/${businessId}/responses`)}
                     />
                 </div>
                 <div style={{ flex: '1 1 300px', minWidth: '300px' }}>

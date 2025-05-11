@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User } from '../types/User';
+import { useNavigate } from 'react-router-dom';
 
 interface AuthContextData {
     isAuthenticated: boolean;
@@ -8,6 +9,7 @@ interface AuthContextData {
     logout: () => void;
     checkAndUpdateToken: () => void;
     getAuthHeader: () => { Authorization?: string };
+    setUser: (user: User) => void;
 }
 
 const AuthContext = createContext<AuthContextData>({
@@ -16,7 +18,8 @@ const AuthContext = createContext<AuthContextData>({
     login: () => { },
     logout: () => { },
     checkAndUpdateToken: () => { },
-    getAuthHeader: () => ({})
+    getAuthHeader: () => ({}),
+    setUser: () => { }
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -56,6 +59,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [user, setUser] = useState<User | null>(null);
     const [isInitialized, setIsInitialized] = useState(false);
+    const navigate = useNavigate();
 
     // Debug fonksiyonu
     const debugLocalStorage = () => {
@@ -123,24 +127,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     throw new Error('Geçersiz kullanıcı verisi');
                 }
 
+                // İşletme bilgisini doğrula
+                let businessId = null;
+                if (parsedUser.business) {
+                    if (typeof parsedUser.business === 'string' &&
+                        parsedUser.business.trim() !== '' &&
+                        parsedUser.business !== 'undefined' &&
+                        parsedUser.business !== 'null') {
+                        businessId = parsedUser.business.trim();
+                    }
+                }
+
                 // Business kontrolü (BUSINESS_ADMIN rolü için)
-                if (parsedUser.role === 'BUSINESS_ADMIN' && !parsedUser.business) {
+                if (parsedUser.role === 'BUSINESS_ADMIN' && !businessId) {
                     console.warn('BUSINESS_ADMIN rolü olan kullanıcının işletme bilgisi yok:', parsedUser._id);
-                    
-                    // Not: Bu kullanıcının rolüne göre farklı işlem yapılabilir
-                    // Bu bir geliştirme hatası olabilir
-                    
-                    // Acil çözüm: localStorage'daki eksik business ID'yi manuel güncelleyebiliriz
-                    // Bu sadece geliştirme veya acil çözüm için kullanılmalıdır
-                    /*
-                    const updatedUser = {
-                        ...parsedUser,
-                        business: "680b5c64cf5e6715deff1e0a" // Gerçek bir business ID ekleyin
-                    };
-                    safeSetItem('user', JSON.stringify(updatedUser));
-                    parsedUser = updatedUser;
-                    console.log('İşletme ID manuel olarak eklendi:', updatedUser.business);
-                    */
+                    parsedUser.needsBusinessConfig = true;
+                } else {
+                    parsedUser.needsBusinessConfig = false;
+                    // İşletme ID'sini güncelle
+                    parsedUser.business = businessId;
                 }
 
                 setIsAuthenticated(true);
@@ -177,29 +182,62 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const login = (token: string, userData: User) => {
         console.log('Login bilgileri kaydediliyor...', { tokenLength: token?.length, userData });
+        console.log('API yanıtından gelen ham kullanıcı verisi:', JSON.stringify(userData));
 
-        // İşletme bilgisi yoksa ve kullanıcı BUSINESS_ADMIN ise uyarı
-        if (userData.role === 'BUSINESS_ADMIN' && !userData.business) {
-            console.warn('BUSINESS_ADMIN rolündeki kullanıcının işletme bilgisi yok!');
-
-            // Eğer backend userData içinde business göndermiyorsa, manuel olarak ekleyelim
-            // Bu, geçici bir çözüm olarak eklenmiştir (hardcoded)
-            userData = {
-                ...userData,
-                business: '64d7e5b8c7b5abb345678901' // Örnek işletme ID'si
-            };
-            console.log('İşletme ID manuel olarak eklendi:', userData);
+        // İşletme bilgisini doğrula
+        let businessId = null;
+        if (userData.business) {
+            if (typeof userData.business === 'string') {
+                if (userData.business.trim() !== '' &&
+                    userData.business !== 'undefined' &&
+                    userData.business !== 'null') {
+                    businessId = userData.business.trim();
+                    console.log('String olarak işletme ID bulundu:', businessId);
+                }
+            } else if (typeof userData.business === 'object' && userData.business !== null) {
+                // TypeScript için daha güvenli tür kontrolü
+                const businessObj = userData.business as any;
+                if (businessObj._id) {
+                    businessId = businessObj._id;
+                    console.log('Nesne içinde işletme ID bulundu:', businessId);
+                }
+            }
         }
 
+        // Güncellenmiş kullanıcı verisi oluştur
+        const updatedUserData = {
+            ...userData,
+            business: businessId
+        };
+
+        // İşletme bilgisi yoksa ve kullanıcı BUSINESS_ADMIN ise uyarı
+        if (updatedUserData.role === 'BUSINESS_ADMIN' && !businessId) {
+            console.warn('BUSINESS_ADMIN rolündeki kullanıcının işletme bilgisi yok!');
+            console.log('İşletme ID eksik! Kullanıcı DevTools sayfasını kullanarak işletme seçmeli.');
+            updatedUserData.needsBusinessConfig = true;
+        } else {
+            updatedUserData.needsBusinessConfig = false;
+        }
+
+        console.log('Son işlenmiş kullanıcı verileri:', updatedUserData);
+
         safeSetItem('token', token);
-        safeSetItem('user', JSON.stringify(userData));
+        safeSetItem('user', JSON.stringify(updatedUserData));
         setIsAuthenticated(true);
-        setUser(userData);
+        setUser(updatedUserData);
         console.log('Kullanıcı giriş yaptı:', {
-            email: userData.email,
-            role: userData.role,
-            business: userData.business || 'İşletme bilgisi yok'
+            email: updatedUserData.email,
+            role: updatedUserData.role,
+            business: updatedUserData.business || 'İşletme bilgisi yok',
+            needsConfig: updatedUserData.needsBusinessConfig
         });
+
+        // Eğer BUSINESS_ADMIN kullanıcısı ve işletme bilgisi yoksa DevTools sayfasına yönlendir
+        if (updatedUserData.role === 'BUSINESS_ADMIN' && !updatedUserData.business) {
+            setTimeout(() => {
+                navigate('/dev-tools');
+            }, 500);
+        }
     };
 
     const logout = () => {
@@ -210,13 +248,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.log('Kullanıcı çıkış yaptı');
     };
 
+    // setUser fonksiyonu dışarıya açılmalı
+    const updateUser = (updatedUser: User) => {
+        setUser(updatedUser);
+        // User verilerini localStorage'a kaydet
+        safeSetItem('user', JSON.stringify(updatedUser));
+        console.log('Kullanıcı bilgileri güncellendi:', {
+            id: updatedUser._id,
+            email: updatedUser.email,
+            role: updatedUser.role,
+            business: updatedUser.business || 'YOK'
+        });
+    };
+
     // İlk yükleme tamamlanana kadar bir yükleme ekranı gösterebiliriz
     if (!isInitialized) {
         return <div>Yükleniyor...</div>;
     }
 
     return (
-        <AuthContext.Provider value={{ isAuthenticated, user, login, logout, checkAndUpdateToken, getAuthHeader }}>
+        <AuthContext.Provider value={{
+            isAuthenticated,
+            user,
+            login,
+            logout,
+            checkAndUpdateToken,
+            getAuthHeader,
+            setUser: updateUser
+        }}>
             {children}
         </AuthContext.Provider>
     );

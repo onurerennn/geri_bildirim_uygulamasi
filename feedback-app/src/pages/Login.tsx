@@ -65,7 +65,7 @@ const Login: React.FC = () => {
                 console.log('Checking API status...');
                 try {
                     // First try with the configured API (using proxy)
-                    const response = await api.get('/api/debug');
+                    const response = await api.get('/debug');
                     console.log('API debug response:', response.data);
                     setApiStatus('Connected');
                     return; // Success, exit early
@@ -73,7 +73,7 @@ const Login: React.FC = () => {
                     console.warn('Initial API check failed, trying direct connection...');
 
                     // Try direct connection as fallback
-                    const directResponse = await fetch('http://localhost:5000/api/debug');
+                    const directResponse = await fetch('http://localhost:5000/debug');
                     if (directResponse.ok) {
                         const data = await directResponse.json();
                         console.log('Direct API connection successful:', data);

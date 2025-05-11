@@ -31,8 +31,8 @@ const api = axios.create({
         'Accept': 'application/json',
         'X-Requested-With': 'XMLHttpRequest'
     },
-    withCredentials: true,
-    timeout: 30000
+    withCredentials: false,
+    timeout: 60000
 });
 
 // Her istekte authentication token'ı ekle
@@ -68,30 +68,21 @@ api.interceptors.request.use(
 
         // Full URL'i oluştur ve logla
         const fullUrl = `${config.baseURL || ''}${config.url || ''}`;
+        console.log(`📡 API İsteği: ${config.method?.toUpperCase()} ${fullUrl}`);
 
-        // Anket oluşturma isteği için özel loglama
-        if (config.method === 'post' && config.url === '/api/surveys') {
-            console.log('ANKET OLUŞTURMA İSTEĞİ GÖNDERILIYOR');
-            console.log('Tam URL:', fullUrl);
+        // Anket veya işletme ile ilgili istekler için daha detaylı loglama
+        if (
+            config.url?.includes('survey') ||
+            config.url?.includes('business') ||
+            config.url?.includes('/all')
+        ) {
+            console.log('🔍 Anket/İşletme isteği detayları:');
+            console.log('URL:', fullUrl);
             console.log('Headers:', JSON.stringify(config.headers, null, 2));
-            console.log('Data:', JSON.stringify(config.data, null, 2));
-        }
-
-        console.log('API isteği gönderiliyor:', {
-            method: config.method?.toUpperCase(),
-            url: config.url,
-            fullUrl: fullUrl,
-            baseURL: config.baseURL,
-            data: config.data ?
-                (typeof config.data === 'string' ?
-                    'String data: ' + config.data.substring(0, 100) :
-                    { ...config.data, password: config.data.password ? '***' : undefined }
-                ) : null,
-            headers: {
-                ...config.headers,
-                Authorization: config.headers?.Authorization ? 'Bearer ***' : undefined
+            if (config.method === 'post' || config.method === 'put') {
+                console.log('Data:', JSON.stringify(config.data, null, 2));
             }
-        });
+        }
 
         return config;
     },

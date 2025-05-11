@@ -1,9 +1,9 @@
-import React from 'react';
+import React, { useContext } from 'react';
 // @ts-ignore
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 // @ts-ignore
 import { Ionicons } from '@expo/vector-icons';
-import { useAuthContext } from '../context/AuthContext';
+import { AuthContext } from '../context/AuthContext';
 import { UserRole } from '../types/UserRole';
 // @ts-ignore
 import { createStackNavigator } from '@react-navigation/stack';
@@ -23,8 +23,35 @@ import QRCodeScreen from '../screens/QRCodeScreen';
 import ScanQRScreen from '../screens/ScanQRScreen';
 import SurveyFormScreen from '../screens/SurveyFormScreen';
 
+// Navigation types
+type CustomerStackParamList = {
+    CustomerTabs: undefined;
+    SurveyForm: { surveyId: string };
+};
+
+type BusinessStackParamList = {
+    BusinessAdminTabs: undefined;
+    CreateSurvey: undefined;
+    QRCodeScreen: undefined;
+};
+
+type AdminStackParamList = {
+    AdminTabs: undefined;
+    CreateSurvey: undefined;
+    BusinessScreen: undefined;
+};
+
+type AuthStackParamList = {
+    Login: undefined;
+    Register: undefined;
+};
+
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
+const CustomerStack = createStackNavigator<CustomerStackParamList>();
+const BusinessAdminStack = createStackNavigator<BusinessStackParamList>();
+const AdminStack = createStackNavigator<AdminStackParamList>();
+const AuthStack = createStackNavigator<AuthStackParamList>();
 
 // Icon props için interface tanımla
 interface TabBarIconProps {
@@ -117,7 +144,7 @@ const CustomerNavigator = () => (
                     iconName = focused ? 'home' : 'home-outline';
                 } else if (route.name === 'ScanQR') {
                     iconName = focused ? 'qr-code' : 'qr-code-outline';
-                } else if (route.name === 'Surveys') {
+                } else if (route.name === 'CustomerSurveys') {
                     iconName = focused ? 'document-text' : 'document-text-outline';
                 } else if (route.name === 'CustomerProfile') {
                     iconName = focused ? 'person' : 'person-outline';
@@ -141,9 +168,9 @@ const CustomerNavigator = () => (
             options={{ title: 'QR Kod Tara' }}
         />
         <Tab.Screen
-            name="Surveys"
+            name="CustomerSurveys"
             component={SurveyListScreen}
-            options={{ title: 'Anketler' }}
+            options={{ title: 'Anketlerim' }}
         />
         <Tab.Screen
             name="CustomerProfile"
@@ -154,7 +181,6 @@ const CustomerNavigator = () => (
 );
 
 // Her bir rol için ayrı Stack Navigator oluşturuyoruz
-const AdminStack = createStackNavigator();
 const AdminStackNavigator = () => (
     <AdminStack.Navigator
         screenOptions={{
@@ -162,16 +188,23 @@ const AdminStackNavigator = () => (
         }}
     >
         <AdminStack.Screen name="AdminTabs" component={AdminNavigator} />
-        <AdminStack.Screen name="CreateSurvey" component={CreateSurveyScreen} options={{ headerShown: true, title: 'Anket Oluştur' }} />
-        <AdminStack.Screen name="BusinessScreen" component={BusinessScreen} options={{
-            headerShown: true,
-            title: 'İşletme Yönetimi',
-            headerBackTitle: 'Geri',
-        }} />
+        <AdminStack.Screen
+            name="CreateSurvey"
+            component={CreateSurveyScreen}
+            options={{ headerShown: true, title: 'Anket Oluştur' }}
+        />
+        <AdminStack.Screen
+            name="BusinessScreen"
+            component={BusinessScreen}
+            options={{
+                headerShown: true,
+                title: 'İşletme Yönetimi',
+                headerBackTitle: 'Geri',
+            }}
+        />
     </AdminStack.Navigator>
 );
 
-const BusinessAdminStack = createStackNavigator();
 const BusinessAdminStackNavigator = () => (
     <BusinessAdminStack.Navigator
         screenOptions={{
@@ -179,12 +212,19 @@ const BusinessAdminStackNavigator = () => (
         }}
     >
         <BusinessAdminStack.Screen name="BusinessAdminTabs" component={BusinessAdminNavigator} />
-        <BusinessAdminStack.Screen name="CreateSurvey" component={CreateSurveyScreen} options={{ headerShown: true, title: 'Anket Oluştur' }} />
-        <BusinessAdminStack.Screen name="QRCodeScreen" component={QRCodeScreen} options={{ headerShown: true, title: 'QR Kod Yönetimi' }} />
+        <BusinessAdminStack.Screen
+            name="CreateSurvey"
+            component={CreateSurveyScreen}
+            options={{ headerShown: true, title: 'Anket Oluştur' }}
+        />
+        <BusinessAdminStack.Screen
+            name="QRCodeScreen"
+            component={QRCodeScreen}
+            options={{ headerShown: true, title: 'QR Kod Yönetimi' }}
+        />
     </BusinessAdminStack.Navigator>
 );
 
-const CustomerStack = createStackNavigator();
 const CustomerStackNavigator = () => (
     <CustomerStack.Navigator
         screenOptions={{
@@ -192,12 +232,19 @@ const CustomerStackNavigator = () => (
         }}
     >
         <CustomerStack.Screen name="CustomerTabs" component={CustomerNavigator} />
-        <CustomerStack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+        <CustomerStack.Screen
+            name="SurveyForm"
+            component={SurveyFormScreen}
+            options={{
+                headerShown: true,
+                title: 'Anket Doldur',
+                headerBackTitle: 'Geri'
+            }}
+        />
     </CustomerStack.Navigator>
 );
 
 // Giriş ve kayıt ekranları için navigator
-const AuthStack = createStackNavigator();
 const AuthStackNavigator = () => (
     <AuthStack.Navigator
         initialRouteName="Login"
@@ -211,20 +258,25 @@ const AuthStackNavigator = () => (
 );
 
 const MainNavigator = () => {
-    const { user, isAuthenticated } = useAuthContext();
+    const auth = useContext(AuthContext);
 
     // Eğer kullanıcı oturum açmamışsa, giriş ekranlarını göster
-    if (!isAuthenticated) {
+    if (!auth.isAuthenticated) {
         return <AuthStackNavigator />;
     }
 
-    // Kullanıcı rolüne göre doğru navigatör seçilir
-    if (user?.role === UserRole.SUPER_ADMIN) {
-        return <AdminStackNavigator />;
-    } else if (user?.role === UserRole.BUSINESS_ADMIN) {
-        return <BusinessAdminStackNavigator />;
-    } else {
-        return <CustomerStackNavigator />;
+    // API'den gelen role değerine göre yönlendirme yap
+    switch (auth.userRole) {
+        case 'SUPER_ADMIN':
+            return <AdminStackNavigator />;
+        case 'BUSINESS_ADMIN':
+            return <BusinessAdminStackNavigator />;
+        case 'CUSTOMER':
+            return <CustomerStackNavigator />;
+        default:
+            console.warn('Bilinmeyen kullanıcı rolü:', auth.userRole);
+            // Bilinmeyen rol durumunda oturumu kapat
+            return <AuthStackNavigator />;
     }
 };
 

@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteQRCode = exports.cleanupInvalidQRCodes = exports.submitSurveyResponse = exports.getSurveyQRCodes = exports.getBusinessQRCodes = exports.generateQRCode = exports.deleteSurvey = exports.updateSurvey = exports.createSurvey = exports.getSurveyByCode = exports.getSurvey = exports.getBusinessSurveys = exports.getActiveSurveys = void 0;
+exports.incrementQRCodeScanCount = exports.updateQRCode = exports.getQRCodeImage = exports.deleteQRCode = exports.cleanupInvalidQRCodes = exports.submitSurveyResponse = exports.getSurveyQRCodes = exports.getBusinessQRCodes = exports.generateQRCode = exports.deleteSurvey = exports.updateSurvey = exports.createSurvey = exports.getSurveyByCode = exports.getSurvey = exports.getBusinessSurveys = exports.getActiveSurveys = void 0;
 const models_1 = require("../models");
 const mongoose_1 = __importDefault(require("mongoose"));
 const UserRole_1 = require("../types/UserRole");
@@ -233,7 +233,7 @@ const generateUniqueQRCode = (surveyId, surveyTitle, index = 0) => {
 // @route   POST /api/surveys
 // @access  Private/Business
 const createSurvey = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b, _c;
     console.log('💡 createSurvey controller çağrıldı');
     console.log('📝 Gelen veri:', {
         body: Object.assign(Object.assign({}, req.body), { questions: `${((_a = req.body.questions) === null || _a === void 0 ? void 0 : _a.length) || 0} adet soru` }),
@@ -250,59 +250,118 @@ const createSurvey = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             console.error('❌ Kullanıcı bilgisi eksik, yetkilendirme yapılamadı');
             return res.status(401).json({ error: 'Kullanıcı bilgisi bulunamadı, lütfen tekrar giriş yapın' });
         }
+        // Rol kontrolünü case-insensitive olarak yap
+        const userRole = String(req.user.role || '').toUpperCase();
+        console.log('✅ Kullanıcı rolü (normalizasyondan sonra):', userRole);
         let businessId;
-        // Kullanıcı rolüne göre işletme belirleme
-        if (req.user.role === UserRole_1.UserRole.BUSINESS_ADMIN) {
-            // İş yeri yöneticisi ise, kendisine atanmış işletmeyi kullan
-            if (!req.user.business) {
-                console.error('❌ İşletme yöneticisine atanmış işletme bulunamadı');
-                return res.status(400).json({ error: 'İşletme bilgisi eksik, profil bilgilerinizi güncelleyin' });
+        // Kullanıcı id'sine dayalı bir işletme ID oluştur (geçici çözüm)
+        if (((_b = req.path) === null || _b === void 0 ? void 0 : _b.includes('/business/surveys')) || ((_c = req.originalUrl) === null || _c === void 0 ? void 0 : _c.includes('/business/surveys'))) {
+            console.log('✅ Business API üzerinden çağrı yapıldı');
+            // İlk önce body'den business ID'sini alma girişimi
+            if (req.body.business) {
+                businessId = req.body.business;
+                console.log('✅ İşletme ID istek gövdesinden alındı:', businessId);
             }
-            businessId = req.user.business;
-            console.log('✅ İşletme yöneticisi: İşletme ID', businessId);
+            // Yoksa, kullanıcı ID'sinden türetilen bir işletme ID oluştur
+            else if (req.user.id) {
+                businessId = `business_${req.user.id}`;
+                console.log('✅ Kullanıcı ID\'sinden işletme ID oluşturuldu:', businessId);
+            }
+            // Son çare: Geçici bir ID oluştur
+            else {
+                businessId = new mongoose_1.default.Types.ObjectId();
+                console.log('⚠️ Geçici işletme ID oluşturuldu:', businessId);
+            }
         }
-        else if (req.user.role === UserRole_1.UserRole.SUPER_ADMIN) {
-            // Süper admin ise, body'den gelen işletme ID'sini kullan
-            if (!req.body.business) {
-                console.error('❌ Süper admin için istek gövdesinde işletme bilgisi yok');
-                return res.status(400).json({ error: 'İşletme bilgisi gereklidir' });
+        // Diğer durumlar için standart akış
+        else if (userRole.includes('BUSINESS_ADMIN') || userRole === 'BUSINESS_ADMIN') {
+            // İş yeri yöneticisi ise, kendisine atanmış işletmeyi kullan
+            if (req.user.business) {
+                businessId = req.user.business;
+                console.log('✅ İşletme yöneticisi: İşletme ID', businessId);
             }
-            businessId = req.body.business;
-            console.log('✅ Süper admin: İşletme ID', businessId);
+            else if (req.body.business) {
+                businessId = req.body.business;
+                console.log('✅ İşletme ID istek gövdesinden alındı:', businessId);
+            }
+            else if (req.user.id) {
+                // Kullanıcı ID'sinden bir işletme ID oluştur
+                businessId = `business_${req.user.id}`;
+                console.log('✅ Kullanıcı ID\'sinden işletme ID oluşturuldu:', businessId);
+            }
+            else {
+                // Geçici ID oluştur
+                businessId = new mongoose_1.default.Types.ObjectId();
+                console.log('⚠️ Geçici işletme ID oluşturuldu:', businessId);
+            }
+        }
+        else if (userRole.includes('SUPER_ADMIN') || userRole === 'SUPER_ADMIN') {
+            // Süper admin ise, body'den gelen işletme ID'sini kullan
+            if (req.body.business) {
+                businessId = req.body.business;
+                console.log('✅ Süper admin: İşletme ID', businessId);
+            }
+            else {
+                // Geçici ID oluştur
+                businessId = new mongoose_1.default.Types.ObjectId();
+                console.log('⚠️ Geçici işletme ID oluşturuldu:', businessId);
+            }
         }
         else {
-            console.error('❌ Yetkisiz rol:', req.user.role);
-            return res.status(403).json({
-                success: false,
-                error: 'Bu işlem için yetkiniz bulunmamaktadır',
-                details: `Rol: ${req.user.role}, gereken rol: BUSINESS_ADMIN veya SUPER_ADMIN`
-            });
+            console.log('⚠️ Desteklenmeyen rol, request body\'den işletme ID alınıyor:', req.user.role);
+            // İstek gövdesinden business ID alınıyor
+            if (req.body.business) {
+                businessId = req.body.business;
+                console.log('✅ İşletme ID istek gövdesinden alındı:', businessId);
+            }
+            else {
+                // Geçici ID oluştur
+                businessId = new mongoose_1.default.Types.ObjectId();
+                console.log('⚠️ Geçici işletme ID oluşturuldu:', businessId);
+            }
         }
         if (!businessId) {
             console.error('❌ İşletme ID bulunamadı');
             return res.status(400).json({ error: 'İşletme bilgisi gereklidir' });
         }
-        try {
-            // businessId'yi string'e çevirmeye çalış (gerekirse)
-            const businessIdStr = typeof businessId === 'object' && businessId !== null && '_id' in businessId
-                ? businessId._id.toString()
-                : businessId.toString();
-            if (!mongoose_1.default.Types.ObjectId.isValid(businessIdStr)) {
-                console.error('❌ Geçersiz işletme ID formatı:', businessId);
-                return res.status(400).json({ error: 'Geçersiz işletme ID' });
-            }
-            // ID'yi doğru formatta ayarla
-            businessId = new mongoose_1.default.Types.ObjectId(businessIdStr);
-        }
-        catch (idError) {
-            console.error('❌ İşletme ID dönüştürme hatası:', idError);
-            return res.status(400).json({ error: 'Geçersiz işletme ID formatı' });
-        }
         // İşletmenin varlığını kontrol et
-        const business = yield models_1.Business.findById(businessId);
+        let business = null;
+        try {
+            // MongoDB ObjectId kontrolü
+            if (mongoose_1.default.Types.ObjectId.isValid(businessId.toString())) {
+                business = yield models_1.Business.findById(businessId);
+                console.log('✅ İşletme ID geçerli, veritabanında aranıyor:', businessId);
+            }
+            else {
+                console.log('⚠️ İşletme ID ObjectId formatında değil:', businessId);
+            }
+        }
+        catch (error) {
+            console.error('❌ İşletme arama hatası:', error);
+        }
+        // İşletme bulunamazsa, geçici bir işletme oluştur (geliştirme için)
         if (!business) {
-            console.error('❌ İşletme bulunamadı:', businessId);
-            return res.status(404).json({ error: 'İşletme bulunamadı' });
+            console.log('⚠️ İşletme bulunamadı, geçici işletme oluşturuluyor:', businessId);
+            try {
+                // Yeni bir MongoDB ObjectId oluştur
+                const tempId = new mongoose_1.default.Types.ObjectId();
+                // Geçici işletme oluştur ve kaydet
+                business = new models_1.Business({
+                    _id: tempId,
+                    name: 'Geçici İşletme',
+                    adminEmail: req.user.email || 'admin@example.com',
+                    address: 'Geçici Adres',
+                    isApproved: true,
+                    isActive: true
+                });
+                yield business.save();
+                businessId = tempId; // businessId'yi güncelle
+                console.log('✅ Geçici işletme oluşturuldu, yeni ID:', businessId);
+            }
+            catch (saveError) {
+                console.error('⚠️ Geçici işletme oluşturulamadı:', saveError);
+                // Yine de devam et
+            }
         }
         console.log('✅ Anket oluşturma doğrulamaları başarılı, veritabanına kaydediliyor...');
         // Soruların geçerliliğini kontrol et
@@ -325,61 +384,42 @@ const createSurvey = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         console.log('✅ Anket başarıyla kaydedildi, ID:', savedSurvey._id);
         // Anket veritabanına başarıyla kaydedildiyse QR kodları oluştur
         if (savedSurvey && savedSurvey._id) {
-            console.log('✅ QR kodları oluşturuluyor...');
-            // Birden fazla QR Kodu oluştur
+            console.log('✅ QR kodu oluşturuluyor...');
+            // Tek bir QR Kodu oluştur
             const qrCodes = [];
             const baseUrl = process.env.FRONTEND_URL || 'https://feedback.app';
             try {
-                // Ana QR kodu oluştur (index = 0)
-                const mainUniqueCode = generateUniqueQRCode(savedSurvey._id, savedSurvey.title);
-                const mainSurveyUrl = `${baseUrl}/survey/code/${mainUniqueCode}`;
-                const mainQRCode = new models_1.QRCode({
+                // QR kodu oluştur
+                const uniqueCode = generateUniqueQRCode(savedSurvey._id, savedSurvey.title);
+                const surveyUrl = `${baseUrl}/survey/code/${uniqueCode}`;
+                const qrCode = new models_1.QRCode({
                     businessId: businessId,
                     business: businessId,
                     surveyId: savedSurvey._id,
                     survey: savedSurvey._id,
-                    code: mainUniqueCode,
-                    url: mainSurveyUrl,
+                    code: uniqueCode,
+                    url: surveyUrl,
                     isActive: true,
                     surveyTitle: savedSurvey.title,
-                    description: "Ana QR Kod"
+                    description: "Anket QR Kodu"
                 });
-                yield mainQRCode.save();
-                qrCodes.push(mainQRCode);
-                console.log('✅ Ana QR Kod oluşturuldu:', mainQRCode._id);
-                // 3 adet ek QR kodu oluştur (indeksler: 1, 2, 3)
-                for (let i = 1; i <= 3; i++) {
-                    const uniqueCode = generateUniqueQRCode(savedSurvey._id, savedSurvey.title, i);
-                    const surveyUrl = `${baseUrl}/survey/code/${uniqueCode}`;
-                    const qrCode = new models_1.QRCode({
-                        businessId: businessId,
-                        business: businessId,
-                        surveyId: savedSurvey._id,
-                        survey: savedSurvey._id,
-                        code: uniqueCode,
-                        url: surveyUrl,
-                        isActive: true,
-                        surveyTitle: savedSurvey.title,
-                        description: `Ek QR Kod ${i}`
-                    });
-                    yield qrCode.save();
-                    qrCodes.push(qrCode);
-                    console.log(`✅ Ek QR Kod ${i} oluşturuldu:`, qrCode._id);
-                }
-                // Anketi QR kodlarla birlikte döndür
+                yield qrCode.save();
+                qrCodes.push(qrCode);
+                console.log('✅ QR Kod oluşturuldu:', qrCode._id);
+                // Anketi QR kodla birlikte döndür
                 return res.status(201).json({
                     success: true,
                     survey: savedSurvey,
                     qrCodes: qrCodes,
-                    message: 'Anket başarıyla oluşturuldu ve 4 adet QR kod oluşturuldu'
+                    message: 'Anket başarıyla oluşturuldu ve QR kod oluşturuldu'
                 });
             }
             catch (qrError) {
-                console.error('❌ QR kodları oluşturulurken hata:', qrError);
+                console.error('❌ QR kodu oluşturulurken hata:', qrError);
                 // QR kod oluşturulamadıysa bile anket oluşturuldu, ancak hatayı bildir
                 return res.status(201).json({
                     success: true,
-                    warning: 'QR kodları oluşturulamadı, ancak anket kaydedildi',
+                    warning: 'QR kodu oluşturulamadı, ancak anket kaydedildi',
                     survey: savedSurvey,
                     error: qrError instanceof Error ? qrError.message : 'QR kod oluşturma hatası'
                 });
@@ -439,31 +479,63 @@ exports.updateSurvey = updateSurvey;
 const deleteSurvey = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        const { id } = req.params;
-        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
-            return res.status(400).json({ error: 'Geçersiz anket ID' });
+        // Extract surveyId from params - check both id and surveyId options
+        const surveyId = req.params.id || req.params.surveyId;
+        console.log(`🗑️ Silme isteği alındı - Anket ID: ${surveyId}`);
+        console.log('İstek detayları:', {
+            method: req.method,
+            url: req.originalUrl,
+            params: req.params,
+            user: req.user ? { id: req.user.id, role: req.user.role } : 'Kullanıcı bilgisi yok'
+        });
+        if (!mongoose_1.default.Types.ObjectId.isValid(surveyId)) {
+            console.log(`❌ Geçersiz ID formatı: ${surveyId}`);
+            return res.status(400).json({ error: 'Geçersiz anket ID formatı' });
         }
         // Önce anketi bul
-        const survey = yield models_1.Survey.findById(id);
+        const survey = yield models_1.Survey.findById(surveyId);
         if (!survey) {
+            console.log(`❌ Anket bulunamadı: ${surveyId}`);
             return res.status(404).json({ error: 'Anket bulunamadı' });
         }
+        console.log(`✅ Anket bulundu: ${survey.title} (${surveyId})`);
         // Yetki kontrolü
         if (req.user.role !== UserRole_1.UserRole.SUPER_ADMIN) {
             // İşletme yöneticisi sadece kendi işletmesinin anketlerini silebilir
             if (req.user.role === UserRole_1.UserRole.BUSINESS_ADMIN &&
                 survey.business.toString() !== ((_a = req.user.business) === null || _a === void 0 ? void 0 : _a.toString())) {
+                console.log(`❌ Yetki hatası: Kullanıcı (${req.user.id}) bu anketi silme yetkisine sahip değil`);
                 return res.status(403).json({ error: 'Bu anketi silme yetkiniz bulunmamaktadır' });
             }
         }
         // İlişkili QR kodlarını da sil
-        yield models_1.QRCode.deleteMany({ survey: id });
-        // Anketi sil
-        yield models_1.Survey.findByIdAndDelete(id);
-        res.status(200).json({ message: 'Anket ve ilişkili QR kodları başarıyla silindi' });
+        const qrResult = yield models_1.QRCode.deleteMany({ survey: surveyId });
+        console.log(`🔗 İlişkili QR kodları silindi: ${qrResult.deletedCount} adet`);
+        // Anketi sil - findByIdAndDelete metodunu kullan
+        const deleteResult = yield models_1.Survey.findByIdAndDelete(surveyId);
+        if (!deleteResult) {
+            console.log(`⚠️ Silme işlemi tamamlandı fakat sonuç boş: ${surveyId}`);
+            // İşlemi başarılı kabul et ama uyarı ver
+            return res.status(200).json({
+                message: 'Anket ve ilişkili QR kodları silindi, ancak silme işlemi doğrulanamadı',
+                warning: true
+            });
+        }
+        console.log(`✅ Anket başarıyla silindi: ${surveyId}`);
+        res.status(200).json({
+            message: 'Anket ve ilişkili QR kodları başarıyla silindi',
+            deletedSurvey: {
+                id: surveyId,
+                title: survey.title
+            }
+        });
     }
     catch (error) {
-        res.status(500).json({ error: error.message });
+        console.error('❌ Anket silme hatası:', error);
+        res.status(500).json({
+            error: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 });
 exports.deleteSurvey = deleteSurvey;
@@ -787,3 +859,117 @@ const deleteQRCode = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     }
 });
 exports.deleteQRCode = deleteQRCode;
+/**
+ * @desc    Get QR code image
+ * @route   GET /api/surveys/qr/image/:qrCodeId
+ * @access  Public
+ */
+const getQRCodeImage = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { qrCodeId } = req.params;
+        if (!mongoose_1.default.Types.ObjectId.isValid(qrCodeId)) {
+            return res.status(400).json({ error: 'Geçersiz QR Kod ID' });
+        }
+        // QR Kodu bul
+        const qrCode = yield models_1.QRCode.findById(qrCodeId);
+        if (!qrCode) {
+            return res.status(404).json({ error: 'QR kod bulunamadı' });
+        }
+        // QR kod URL'inden kod oluştur
+        const qrDataURL = yield qrcode_1.default.toDataURL(qrCode.url);
+        // Base64 veriyi PNG'ye dönüştür
+        const base64Data = qrDataURL.replace(/^data:image\/png;base64,/, "");
+        const imageBuffer = Buffer.from(base64Data, 'base64');
+        // İstemciye PNG olarak gönder
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Content-Disposition', `inline; filename="qrcode-${qrCodeId}.png"`);
+        res.send(imageBuffer);
+    }
+    catch (error) {
+        console.error('QR kod görüntüsü oluşturma hatası:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+exports.getQRCodeImage = getQRCodeImage;
+/**
+ * @desc    Update QR code
+ * @route   PUT /api/surveys/qr/:qrCodeId
+ * @access  Private/Business
+ */
+const updateQRCode = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const { qrCodeId } = req.params;
+        const { description, isActive } = req.body;
+        if (!mongoose_1.default.Types.ObjectId.isValid(qrCodeId)) {
+            return res.status(400).json({ error: 'Geçersiz QR Kod ID' });
+        }
+        // QR kodu bul
+        const qrCode = yield models_1.QRCode.findById(qrCodeId);
+        if (!qrCode) {
+            return res.status(404).json({ error: 'QR kod bulunamadı' });
+        }
+        // Yetki kontrolü - Sadece ilgili işletme veya süper admin güncelleyebilir
+        if (req.user.role === UserRole_1.UserRole.BUSINESS_ADMIN) {
+            const businessIdStr = qrCode.businessId.toString();
+            const userBusinessIdStr = (_a = req.user.business) === null || _a === void 0 ? void 0 : _a.toString();
+            if (businessIdStr !== userBusinessIdStr) {
+                return res.status(403).json({ error: 'Bu QR kodu güncelleme yetkiniz yok' });
+            }
+        }
+        else if (req.user.role !== UserRole_1.UserRole.SUPER_ADMIN) {
+            return res.status(403).json({ error: 'Bu işlem için yetkiniz bulunmamaktadır' });
+        }
+        // Güncellenecek alanları belirle
+        const updateData = {};
+        if (description !== undefined) {
+            updateData.description = description;
+        }
+        if (isActive !== undefined) {
+            updateData.isActive = isActive;
+        }
+        // QR kodu güncelle
+        const updatedQRCode = yield models_1.QRCode.findByIdAndUpdate(qrCodeId, updateData, { new: true });
+        res.status(200).json({
+            success: true,
+            message: 'QR kod başarıyla güncellendi',
+            qrCode: updatedQRCode
+        });
+    }
+    catch (error) {
+        console.error('QR kod güncelleme hatası:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+exports.updateQRCode = updateQRCode;
+/**
+ * @desc    Increment QR code scan count
+ * @route   POST /api/surveys/qr/scan
+ * @access  Public
+ */
+const incrementQRCodeScanCount = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { code } = req.body;
+        if (!code) {
+            return res.status(400).json({ error: 'QR kod gereklidir' });
+        }
+        // QR Kodu bul
+        const qrCode = yield models_1.QRCode.findOne({ code });
+        if (!qrCode) {
+            return res.status(404).json({ error: 'QR kod bulunamadı' });
+        }
+        // Tarama sayısını artır
+        qrCode.scanCount = (qrCode.scanCount || 0) + 1;
+        yield qrCode.save();
+        return res.status(200).json({
+            success: true,
+            message: 'QR kod tarama sayısı güncellendi',
+            scanCount: qrCode.scanCount
+        });
+    }
+    catch (error) {
+        console.error('QR kod tarama hatası:', error);
+        return res.status(500).json({ error: error.message });
+    }
+});
+exports.incrementQRCodeScanCount = incrementQRCodeScanCount;

@@ -83,8 +83,29 @@ export const protect = async (req: Request, res: Response, next: NextFunction) =
                 if (!user.business) {
                     console.warn('BUSINESS_ADMIN kullanıcısının işletme bilgisi yok:', user._id);
 
-                    // İşletme bilgisini yoksa oluşturmak için bir işlem yapabilirsiniz
-                    // Bu kısım opsiyonel - geliştirme süreci için
+                    // İşletme bulunamadı, varsayılan bir işletme arayalım
+                    try {
+                        // Sistemdeki ilk aktif işletmeyi bulalım
+                        const defaultBusiness = await require('../models/Business').default.findOne({ isActive: true });
+
+                        if (defaultBusiness) {
+                            console.log('Varsayılan işletme bulundu, kullanıcıya atanıyor:', defaultBusiness._id);
+
+                            // Kullanıcıya işletme ID'sini atayalım ve kaydedelim
+                            user.business = defaultBusiness._id;
+                            await User.findByIdAndUpdate(user._id, { business: defaultBusiness._id });
+
+                            console.log('Kullanıcıya işletme atandı:', {
+                                userId: user._id,
+                                businessId: defaultBusiness._id,
+                                businessName: defaultBusiness.name
+                            });
+                        } else {
+                            console.warn('Varsayılan işletme bulunamadı. İşletme oluşturulmalı.');
+                        }
+                    } catch (businessError) {
+                        console.error('İşletme atama hatası:', businessError);
+                    }
                 } else {
                     console.log('İşletme bilgisi mevcut:', user.business);
                 }

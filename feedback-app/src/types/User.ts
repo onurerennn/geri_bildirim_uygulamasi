@@ -6,7 +6,8 @@ export interface User {
     email: string;
     role: UserRole;
     isActive: boolean;
-    business?: string;
+    business?: string | null;
     createdAt: Date;
     updatedAt: Date;
+    needsBusinessConfig?: boolean;
 } 

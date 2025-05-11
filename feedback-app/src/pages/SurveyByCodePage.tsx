@@ -25,19 +25,19 @@ const SurveyByCodePage: React.FC = () => {
                     return;
                 }
 
-                const response = await api.get(`/api/surveys/code/${code}`);
+                const response = await api.get(`/surveys/code/${code}`);
                 setSurvey(response.data);
                 setLoading(false);
             } catch (err: any) {
                 console.error('Anket yüklenirken hata oluştu:', err);
-                
+
                 let errorMessage = 'Anket yüklenirken bir hata oluştu';
                 if (err.response?.status === 404) {
                     errorMessage = 'Bu QR kod için anket bulunamadı';
                 } else if (err.response?.data?.error) {
                     errorMessage = err.response.data.error;
                 }
-                
+
                 setError(errorMessage);
                 setLoading(false);
             }
@@ -49,18 +49,18 @@ const SurveyByCodePage: React.FC = () => {
     const handleSubmit = async (answers: any[]) => {
         try {
             setSubmitting(true);
-            
+
             if (!answers.length) {
                 alert('Lütfen en az bir soruyu cevaplayın');
                 setSubmitting(false);
                 return;
             }
-            
-            await api.post(`/api/surveys/${survey._id}/responses`, {
+
+            await api.post(`/surveys/${survey._id}/responses`, {
                 surveyId: survey._id,
                 answers
             });
-            
+
             setSubmitted(true);
             setSubmitting(false);
         } catch (err: any) {

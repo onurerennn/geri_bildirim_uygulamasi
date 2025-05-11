@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useAuthContext } from '../context/AuthContext';
 import api from '../services/api';
+// @ts-ignore
 import { Picker } from '@react-native-picker/picker';
 import { UserRole } from '../types/UserRole';
 

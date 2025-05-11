@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, Share } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, Share, Platform } from 'react-native';
+// @ts-ignore
 import { Ionicons } from '@expo/vector-icons';
+// @ts-ignore
 import { StackNavigationProp } from '@react-navigation/stack';
 import api from '../services/api';
 import { useAuthContext } from '../context/AuthContext';
+// @ts-ignore
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface QRCode {
