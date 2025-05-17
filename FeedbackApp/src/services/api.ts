@@ -3,6 +3,24 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { UserRole } from '../context/AuthContext';
 
+// API için sabit yapılandırmalar
+const API_CONFIG = {
+    DEFAULT_URL: 'http://192.168.1.10:5000',
+    TIMEOUT: 15000,
+    MAX_RETRIES: 3,
+    RETRY_DELAY: 1000,
+    MAX_REDIRECTS: 3
+};
+
+// API sağlık durumu için tip tanımı
+interface ApiHealthStatus {
+    isHealthy: boolean;
+    lastChecked: number;
+    message: string;
+    currentUrl: string;
+    pingTime?: number;
+}
+
 // API response tipleri
 export interface Survey {
     _id: string;
@@ -25,15 +43,30 @@ export interface SurveyResponse {
         value: string | number;
     }>;
     code?: string;
+    customer?: {
+        name: string;
+        email: string;
+    };
 }
+
+// Global API durumu
+let currentApiUrl = API_CONFIG.DEFAULT_URL;
+let apiHealthStatus: ApiHealthStatus = {
+    isHealthy: false,
+    lastChecked: 0,
+    message: 'API henüz kontrol edilmedi',
+    currentUrl: currentApiUrl
+};
 
 // TypeScript için API fonksiyonlarının arayüzü
 interface Api {
     getApiUrl: () => string;
+    getCurrentApiUrl: () => string;
     changeApiUrl: (newUrl: string) => { success: boolean; message: string; url: string; };
     testConnection: () => Promise<{ success: boolean; url: string; message: string; }>;
     ping: () => Promise<{ success: boolean; message: string; }>;
-    login: (email: string, password: string) => Promise<any>;
+    getApiHealthStatus: () => ApiHealthStatus;
+    login: (email: string, password: string) => Promise<{ success: boolean; token?: string; data?: any; error?: string; }>;
     register: (userData: { name: string; email: string; password: string }) => Promise<any>;
     getUserProfile: () => Promise<any>;
     getFeedbacks: (token: string) => Promise<any>;
@@ -49,21 +82,19 @@ interface Api {
     updateUser: (token: string, id: string, userData: any) => Promise<any>;
     deleteUser: (token: string, id: string) => Promise<any>;
     getDashboardStats: (token: string) => Promise<any>;
-    getApiHealthStatus: () => { isHealthy: boolean; lastChecked: number; message: string; };
     getLastSuccessfulApiUrl: () => string | null;
     getSurveyByQRCode: (qrId: string) => Promise<any>;
     getBusinessSurveys: () => Promise<any>;
-    submitSurveyResponse: (surveyId: string, answers: any) => Promise<any>;
     getSurveyResponses: (surveyId: string) => Promise<any>;
     getActiveSurveys: () => Promise<any>;
     surveys: {
         getAll: (role: UserRole) => Promise<any>;
         getById: (surveyId: string, role: UserRole) => Promise<any>;
-        getByCode: (code: string) => Promise<any>;
         getByQR: (qrCode: string) => Promise<any>;
-        submitResponse: (surveyId: string, answers: SurveyResponse) => Promise<any>;
+        getByCode: (code: string) => Promise<any>;
         getResponses: (surveyId: string) => Promise<any>;
         getStats: (surveyId: string) => Promise<any>;
+        recordScan: (code: string) => Promise<any>;
     };
     business: {
         getProfile: () => Promise<any>;
@@ -75,6 +106,267 @@ interface Api {
         getRewards: () => Promise<any>;
         getHistory: () => Promise<any>;
     };
+    submitSurveyResponse: (surveyId: string, answers: any[], customer?: any) => Promise<any>;
+}
+
+// Yönlendirme geçmişini takip etmek için WeakMap kullanımı
+const redirectionHistory = new WeakMap<any, Set<string>>();
+
+// Axios istemcisini yapılandırma
+const apiClient = axios.create({
+    baseURL: currentApiUrl,
+    headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+    },
+    timeout: API_CONFIG.TIMEOUT,
+    validateStatus: (status) => status >= 200 && status < 500
+});
+
+// Request interceptor - geliştirilmiş versiyon
+apiClient.interceptors.request.use(
+    async (config) => {
+        try {
+            // Token kontrolü
+            const token = await AsyncStorage.getItem('userToken');
+            if (token) {
+                config.headers.Authorization = `Bearer ${token}`;
+            }
+
+            // URL yönlendirme mantığı
+            if (config.url) {
+                // Yönlendirme geçmişini kontrol et
+                let history = redirectionHistory.get(config);
+                if (!history) {
+                    history = new Set<string>();
+                    redirectionHistory.set(config, history);
+                }
+
+                // Döngü kontrolü
+                if (history.has(config.url)) {
+                    console.warn('Yönlendirme döngüsü tespit edildi:', config.url);
+                    return config;
+                }
+
+                // URL'i geçmişe ekle
+                history.add(config.url);
+
+                // Yönlendirme sayısını kontrol et
+                if (history.size > API_CONFIG.MAX_REDIRECTS) {
+                    console.error('Maksimum yönlendirme sayısı aşıldı');
+                    throw new Error('Maksimum yönlendirme sayısı aşıldı');
+                }
+
+                let newUrl = standardizeEndpoint(config.url);
+
+                if (newUrl !== config.url) {
+                    console.log(`Endpoint yönlendiriliyor: ${config.url} -> ${newUrl}`);
+                    config.url = newUrl;
+                }
+            }
+
+            config.baseURL = currentApiUrl;
+            return config;
+        } catch (error) {
+            console.error('Request interceptor hatası:', error);
+            return config;
+        }
+    },
+    (error) => {
+        console.error('Request interceptor hatası:', error);
+        return Promise.reject(error);
+    }
+);
+
+// Response interceptor - geliştirilmiş versiyon
+apiClient.interceptors.response.use(
+    (response) => {
+        if (response.status === 200 || response.status === 201) {
+            return response;
+        }
+
+        if (response.status === 404) {
+            const originalUrl = response.config.url;
+            if (!originalUrl) return response;
+
+            // Yönlendirme geçmişini kontrol et
+            const history = redirectionHistory.get(response.config);
+            if (history?.has(originalUrl)) {
+                console.warn('Bu endpoint için yönlendirme zaten denenmiş:', originalUrl);
+                return response;
+            }
+
+            const newUrl = findAlternativeEndpoint(originalUrl);
+            if (newUrl && newUrl !== originalUrl) {
+                console.log('Alternatif endpoint deneniyor:', newUrl);
+                return apiClient.request({
+                    ...response.config,
+                    url: newUrl
+                });
+            }
+        }
+
+        return response;
+    },
+    async (error) => {
+        if (!error.response) {
+            console.error('Ağ hatası:', error.message);
+            await checkAndUpdateApiHealth();
+            return Promise.reject(new Error('Sunucuya ulaşılamıyor. Lütfen internet bağlantınızı kontrol edin.'));
+        }
+
+        if (error.response.status === 401) {
+            await AsyncStorage.removeItem('userToken');
+            return Promise.reject(new Error('Oturum süresi doldu. Lütfen tekrar giriş yapın.'));
+        }
+
+        return Promise.reject(error);
+    }
+);
+
+// Endpoint standardizasyon fonksiyonu
+function standardizeEndpoint(url: string): string {
+    // MongoDB ID formatı kontrolü
+    const mongoIdPattern = /[a-f\d]{24}/i;
+    const matches = url.match(mongoIdPattern);
+    const surveyId = matches ? matches[0] : null;
+
+    // Anket yanıtları için endpoint standardizasyonu
+    if (surveyId && (
+        url.includes('/respond') ||
+        url.includes('/submit') ||
+        url.includes('/responses') ||
+        url.includes('/feedback')
+    )) {
+        return `/api/surveys/${surveyId}/respond`;
+    }
+
+    // Anket endpoint'leri için standardizasyon
+    if (url.includes('/api/')) {
+        return url
+            .replace(/\/api\/customer\/surveys?\//, '/api/surveys/')
+            .replace(/\/api\/survey\//, '/api/surveys/')
+            .replace(/\/api\/feedback\//, '/api/surveys/')
+            .replace(/\/submit/, '/respond')
+            .replace(/\/response/, '/respond');
+    }
+
+    return url;
+}
+
+// Alternatif endpoint bulma fonksiyonu
+function findAlternativeEndpoint(originalUrl: string): string | null {
+    const endpoints = {
+        surveys: ['/api/surveys', '/api/survey', '/api/feedback', '/api/forms'],
+        responses: ['/api/surveys/responses', '/api/survey-responses', '/api/feedback-responses'],
+        business: ['/api/business/surveys', '/api/business/feedback'],
+        customer: ['/api/customer/surveys', '/api/customer/feedback']
+    };
+
+    // URL'in hangi kategoriye ait olduğunu bul
+    let category: keyof typeof endpoints | null = null;
+    for (const [key, patterns] of Object.entries(endpoints)) {
+        if (patterns.some(pattern => originalUrl.includes(pattern))) {
+            category = key as keyof typeof endpoints;
+            break;
+        }
+    }
+
+    if (!category) return null;
+
+    // Alternatif endpoint'leri dene
+    const alternatives = endpoints[category];
+    for (const alt of alternatives) {
+        if (!originalUrl.includes(alt)) {
+            const newUrl = originalUrl.replace(/\/api\/.*?\//, alt + '/');
+            return newUrl;
+        }
+    }
+
+    return null;
+}
+
+// API sağlık kontrolü fonksiyonu - geliştirilmiş versiyon
+async function checkAndUpdateApiHealth(): Promise<ApiHealthStatus> {
+    const startTime = Date.now();
+    try {
+        const response = await fetch(`${currentApiUrl}/api/ping`, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' },
+            signal: AbortSignal.timeout(5000)
+        });
+
+        apiHealthStatus = {
+            isHealthy: response.ok,
+            lastChecked: Date.now(),
+            message: response.ok ? 'API bağlantısı sağlandı' : `API yanıt kodu: ${response.status}`,
+            currentUrl: currentApiUrl,
+            pingTime: Date.now() - startTime
+        };
+    } catch (error: any) {
+        apiHealthStatus = {
+            isHealthy: false,
+            lastChecked: Date.now(),
+            message: `API bağlantı hatası: ${error.message}`,
+            currentUrl: currentApiUrl,
+            pingTime: Date.now() - startTime
+        };
+
+        // Bağlantı hatası durumunda yedek URL'leri dene
+        await tryBackupUrls();
+    }
+
+    return apiHealthStatus;
+}
+
+// Yedek URL'leri deneme fonksiyonu
+async function tryBackupUrls(): Promise<void> {
+    const backupUrls = [
+        'http://192.168.1.10:5000',
+        'http://192.168.137.1:5000',
+        'http://10.0.2.2:5000',
+        'http://localhost:5000'
+    ].filter(url => url !== currentApiUrl);
+
+    for (const url of backupUrls) {
+        try {
+            const response = await fetch(`${url}/api/ping`, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' },
+                signal: AbortSignal.timeout(3000)
+            });
+
+            if (response.ok) {
+                console.log(`Çalışan yedek URL bulundu: ${url}`);
+                currentApiUrl = url;
+                apiClient.defaults.baseURL = url;
+                return;
+            }
+        } catch (error) {
+            console.warn(`Yedek URL başarısız: ${url}`);
+            continue;
+        }
+    }
+}
+
+// API sağlık monitörü
+function startApiHealthMonitor() {
+    console.log('API sağlık monitörü başlatılıyor...');
+
+    // İlk kontrol
+    checkAndUpdateApiHealth();
+
+    // Periyodik kontrol (30 saniyede bir)
+    setInterval(async () => {
+        const oldStatus = apiHealthStatus.isHealthy;
+        await checkAndUpdateApiHealth();
+
+        if (oldStatus !== apiHealthStatus.isHealthy) {
+            console.log(
+                `API durumu değişti: ${apiHealthStatus.isHealthy ? 'Çalışıyor' : 'Çalışmıyor'} - ${apiHealthStatus.message}`
+            );
+        }
+    }, 30000);
 }
 
 // API için platform bazlı URL - kullanılabilir IP adresleri listesi
@@ -101,102 +393,40 @@ const possibleApiUrls = [
 // En son başarılı bağlantı kurulan URL'yi önbelleğe alacağız
 let lastSuccessfulUrl: string | null = null;
 
-// Retry yapılandırması
-const RETRY_DELAY = 1000; // milisaniye cinsinden, her deneme arasındaki bekleme süresi
-const MAX_RETRIES = 3;    // Bir API isteği için maksimum tekrar deneme sayısı
-
-// Başlangıç URL'i - önce son başarılı URL'yi dene
-let BASE_URL = 'http://192.168.1.10:5000'; // Tercih edilen IP ile başla
-
-// Axios istemcisini yapılandırma
-const apiClient = axios.create({
-    baseURL: BASE_URL,
-    headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-    },
-    timeout: 15000
-});
-
-// Token interceptor
-apiClient.interceptors.request.use(
-    async (config) => {
-        try {
-            const token = await AsyncStorage.getItem('userToken');
-            const userStr = await AsyncStorage.getItem('user');
-            const user = userStr ? JSON.parse(userStr) : null;
-
-            if (token) {
-                config.headers.Authorization = `Bearer ${token}`;
-                console.log('Token eklendi:', token.substring(0, 10) + '...');
-            }
-
-            // URL yönlendirme mantığı
-            if (user?.role && config.url) {
-                let newUrl = config.url;
-
-                // Anket endpoint'lerini rol bazlı yönlendir
-                if (newUrl.includes('/api/survey') || newUrl.includes('/api/surveys')) {
-                    const baseEndpoint = newUrl.includes('/api/survey') ? '/api/survey' : '/api/surveys';
-                    const path = newUrl.replace(baseEndpoint, '');
-
-                    switch (user.role) {
-                        case 'SUPER_ADMIN':
-                            newUrl = `/api/admin/survey${path}`;
-                            break;
-                        case 'BUSINESS_ADMIN':
-                            newUrl = `/api/business/survey${path}`;
-                            break;
-                        case 'CUSTOMER':
-                            newUrl = `/api/customer/survey${path}`;
-                            break;
-                    }
-
-                    config.url = newUrl;
-                    console.log('Endpoint yönlendirildi:', newUrl);
-                }
-            }
-
-            config.baseURL = BASE_URL;
-            console.log('API İsteği:', config.method?.toUpperCase(), config.url);
-
-            return config;
-        } catch (error) {
-            console.error('Request interceptor hatası:', error);
-            return config;
-        }
-    },
-    (error) => {
-        console.error('Request interceptor hatası:', error);
-        return Promise.reject(error);
-    }
-);
-
-// Response interceptor
-apiClient.interceptors.response.use(
-    (response) => {
-        console.log('API Yanıt:', response.status, response.config.url);
-        return response;
-    },
-    async (error) => {
-        if (error.response) {
-            // Yetki hatası (401) durumunda token'ı temizle
-            if (error.response.status === 401) {
-                console.log('Yetki hatası, token temizleniyor...');
-                await AsyncStorage.removeItem('userToken');
-            }
-
-            // Özel hata mesajları
-            const errorMessage = error.response.data?.message || 'Bir hata oluştu';
-            error.message = `Sunucu hatası: ${error.response.status} - ${errorMessage}`;
-        } else if (error.request) {
-            error.message = 'Sunucuya ulaşılamıyor';
+// API bağlantısının iyi durumda olduğunu kontrol et
+const ensureGoodApiConnection = async (): Promise<boolean> => {
+    try {
+        // Son başarılı URL'yi kontrol et
+        if (lastSuccessfulUrl && await isUrlReachable(lastSuccessfulUrl)) {
+            console.log(`Son başarılı API bağlantısı kullanılıyor: ${lastSuccessfulUrl}`);
+            currentApiUrl = lastSuccessfulUrl;
+            apiClient.defaults.baseURL = lastSuccessfulUrl;
+            return true;
         }
 
-        console.error('API Hatası:', error.message);
-        return Promise.reject(error);
+        // Mevcut URL'yi kontrol et
+        if (await isUrlReachable(currentApiUrl)) {
+            console.log(`API bağlantısı başarılı: ${currentApiUrl}`);
+            lastSuccessfulUrl = currentApiUrl; // Başarılı URL'yi önbelleğe al
+            return true;
+        }
+
+        // Çalışan alternatif URL ara
+        const workingUrl = await findWorkingApiUrl();
+        if (workingUrl) {
+            console.log(`Çalışan API URL'si bulundu ve ayarlandı: ${workingUrl}`);
+            currentApiUrl = workingUrl;
+            apiClient.defaults.baseURL = workingUrl;
+            return true;
+        }
+
+        console.log(`API bağlantısı başarısız: ${currentApiUrl}`);
+        return false;
+    } catch (error) {
+        console.error("API bağlantı kontrolü sırasında hata:", error);
+        return false;
     }
-);
+};
 
 // Belirli bir URL'ye erişilebilirliği kontrol et
 const isUrlReachable = async (url: string): Promise<boolean> => {
@@ -247,15 +477,15 @@ const findWorkingApiUrl = async (): Promise<string | null> => {
     }
 
     // Önce mevcut URL'yi kontrol et
-    if (await isUrlReachable(BASE_URL)) {
-        console.log(`Mevcut URL çalışıyor: ${BASE_URL}`);
-        lastSuccessfulUrl = BASE_URL; // Başarılı URL'yi önbelleğe al
-        return BASE_URL;
+    if (await isUrlReachable(currentApiUrl)) {
+        console.log(`Mevcut URL çalışıyor: ${currentApiUrl}`);
+        lastSuccessfulUrl = currentApiUrl; // Başarılı URL'yi önbelleğe al
+        return currentApiUrl;
     }
 
     // Paralelleştirilmiş URL kontrolleri - daha hızlı keşif
     const urlChecks = possibleApiUrls.map(async (url) => {
-        if (url === BASE_URL) return null; // Mevcut URL'yi atla
+        if (url === currentApiUrl) return null; // Mevcut URL'yi atla
 
         try {
             const isReachable = await isUrlReachable(url);
@@ -279,582 +509,71 @@ const findWorkingApiUrl = async (): Promise<string | null> => {
     return null;
 };
 
-// API bağlantısının iyi durumda olduğunu kontrol et
-const ensureGoodApiConnection = async (): Promise<boolean> => {
-    try {
-        // Son başarılı URL'yi kontrol et
-        if (lastSuccessfulUrl && await isUrlReachable(lastSuccessfulUrl)) {
-            console.log(`Son başarılı API bağlantısı kullanılıyor: ${lastSuccessfulUrl}`);
-            BASE_URL = lastSuccessfulUrl;
-            apiClient.defaults.baseURL = lastSuccessfulUrl;
-            return true;
-        }
+// Benzersiz kod oluşturma fonksiyonu
+function generateUniqueCode(): string {
+    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const numbers = '0123456789';
 
-        // Mevcut URL'yi kontrol et
-        if (await isUrlReachable(BASE_URL)) {
-            console.log(`API bağlantısı başarılı: ${BASE_URL}`);
-            lastSuccessfulUrl = BASE_URL; // Başarılı URL'yi önbelleğe al
-            return true;
-        }
+    // İlk harf
+    const firstLetter = letters[Math.floor(Math.random() * letters.length)];
 
-        // Çalışan alternatif URL ara
-        const workingUrl = await findWorkingApiUrl();
-        if (workingUrl) {
-            console.log(`Çalışan API URL'si bulundu ve ayarlandı: ${workingUrl}`);
-            BASE_URL = workingUrl;
-            apiClient.defaults.baseURL = workingUrl;
-            return true;
-        }
-
-        console.log(`API bağlantısı başarısız: ${BASE_URL}`);
-        return false;
-    } catch (error) {
-        console.error("API bağlantı kontrolü sırasında hata:", error);
-        return false;
-    }
-};
-
-// Yardımcı fonksiyon: Yeniden deneme mekanizması
-const fetchWithRetry = async (
-    url: string,
-    options: any = {},
-    maxRetries: number = 3,
-    retryDelay: number = 1000
-): Promise<any> => {
-    let lastError;
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-        try {
-            if (attempt > 0) {
-                console.log(`Yeniden deneme (${attempt}/${maxRetries}): ${url}`);
-            }
-
-            const response = await fetch(url, options);
-            if (!response.ok) {
-                throw new Error(`HTTP Error: ${response.status}`);
-            }
-
-            const data = await response.json();
-            return data;
-        } catch (error) {
-            lastError = error;
-
-            // Bağlantıyı kontrol et ve belki farklı bir URL dene
-            if (attempt < maxRetries - 1) {
-                try {
-                    const isConnected = await ensureGoodApiConnection();
-                    if (isConnected && url.includes(BASE_URL)) {
-                        // URL değiştiğinde, request URL'ini güncelle
-                        url = url.replace(
-                            url.substring(0, url.indexOf('/api')),
-                            BASE_URL
-                        );
-                    }
-                } catch (e) {
-                    // Bağlantı kontrolü başarısız olsa bile devam et
-                }
-
-                // Yeniden denemeden önce bekle
-                await new Promise(r => setTimeout(r, retryDelay));
-            }
-        }
+    // 2-4 rakam
+    const numLength = Math.floor(Math.random() * 3) + 2; // 2-4 arası rakam
+    let numbersPart = '';
+    for (let i = 0; i < numLength; i++) {
+        numbersPart += numbers[Math.floor(Math.random() * numbers.length)];
     }
 
-    throw lastError;
-};
+    // Son harf
+    const lastLetter = letters[Math.floor(Math.random() * letters.length)];
 
-// Interceptor'larla ve retry mekanizmasıyla API isteği gönderen fonksiyon
-const apiRequest = async (
-    method: string,
-    endpoint: string,
-    token?: string,
-    data?: any,
-    retries: number = 3
-) => {
-    // API bağlantısını kontrol et
-    try {
-        await ensureGoodApiConnection();
-    } catch (e) {
-        console.warn("API bağlantısı kontrol edilemedi, istek yine de gönderilecek");
-    }
+    // Anket kısaltması
+    const surveyPart = 'SURV';
 
-    try {
-        const headers: any = {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        };
+    // Zaman damgası (son 4 karakter)
+    const timestamp = Date.now().toString(36).substr(-4);
 
-        if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
-        }
-
-        const config: any = {
-            method: method,
-            url: endpoint,
-            headers: headers,
-            _retryCount: 0,
-            maxRetries: retries,
-            timeout: 15000 // 15 saniye
-        };
-
-        if (data && (method.toLowerCase() === 'post' || method.toLowerCase() === 'put')) {
-            config.data = data;
-        }
-
-        const response = await apiClient(config);
-        return response.data;
-    } catch (error: any) {
-        console.error(`API İsteği Başarısız: ${endpoint}`, error);
-        throw error;
-    }
-};
-
-// TypeScript interfaces for API health
-interface ApiHealthStatus {
-    isHealthy: boolean;
-    lastChecked: number;
-    message: string;
-    pingTime?: number; // Optional for performance metrics
+    // Tüm parçaları birleştir: A123B-SURV-1234C formatında
+    return `${firstLetter}${numbersPart}${lastLetter}-${surveyPart}-${timestamp}`.toUpperCase();
 }
 
-let apiBaseUrl = 'http://192.168.1.10:5000'; // Varsayılan
-let lastSuccessfulApiUrl: string | null = null; // Son başarılı API URL'si
-let apiHealthStatus: ApiHealthStatus = { isHealthy: false, lastChecked: 0, message: 'API henüz kontrol edilmedi' };
-let serverStatusMonitorActive = false;
-
-// API Sağlık durumunu düzenli kontrol eden bir zamanlayıcı
-const startApiHealthMonitor = () => {
-    if (serverStatusMonitorActive) return; // Zaten aktifse çıkış yap
-
-    console.log('API sağlık monitörü başlatılıyor...');
-    serverStatusMonitorActive = true;
-
-    // İlk kontrol
-    checkApiHealth().then(status => {
-        console.log(`İlk API sağlık kontrolü: ${status.isHealthy ? 'Başarılı' : 'Başarısız'} - ${status.message}`);
-    });
-
-    // Her 30 saniyede bir arka planda kontrol et
-    setInterval(() => {
-        checkApiHealth().then(status => {
-            // Durum değiştiyse logla
-            if (status.isHealthy !== apiHealthStatus.isHealthy) {
-                console.log(`API sağlık durumu değişti: ${status.isHealthy ? 'Bağlantı kuruldu' : 'Bağlantı kesildi'} - ${status.message}`);
-            }
-        });
-    }, 30000); // 30 saniye
-};
-
-// API'nin sağlık durumunu kontrol et
-const checkApiHealth = async (): Promise<ApiHealthStatus> => {
-    const startTime = Date.now();
-    try {
-        // Mevcut base URL ile ping endpoint'ini test et
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 saniye timeout
-
-        const response = await fetch(`${apiBaseUrl}/api/ping`, {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' },
-            signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (response.ok) {
-            apiHealthStatus = {
-                isHealthy: true,
-                lastChecked: Date.now(),
-                message: `API bağlantısı sağlandı: ${apiBaseUrl}`,
-                pingTime: Date.now() - startTime
-            };
-            lastSuccessfulApiUrl = apiBaseUrl;
-            return apiHealthStatus;
-        }
-
-        apiHealthStatus = {
-            isHealthy: false,
-            lastChecked: Date.now(),
-            message: `API yanıt verdi fakat durum kodu: ${response.status}`,
-            pingTime: Date.now() - startTime
-        };
-        return apiHealthStatus;
-    } catch (error: any) {
-        apiHealthStatus = {
-            isHealthy: false,
-            lastChecked: Date.now(),
-            message: `API bağlantı hatası: ${error.message || 'Bilinmeyen hata'}`,
-            pingTime: Date.now() - startTime
-        };
-        return apiHealthStatus;
-    }
-};
-
-// Uygulamanın açılışında API sağlık monitörünü başlat
-setTimeout(startApiHealthMonitor, 1000);
-
-// API endpoint'leri için sabit tanımlamalar
-const API_ENDPOINTS = {
-    auth: {
-        login: '/api/auth/login',
-        register: '/api/auth/register',
-        profile: '/api/auth/profile',
-        refreshToken: '/api/auth/refresh-token'
-    },
-    surveys: {
-        base: '/api/survey',  // Tekil form
-        list: '/api/surveys', // Çoğul form
-        create: '/api/survey/create',
-        byId: (id: string) => `/api/survey/${id}`,
-        byQR: (code: string) => `/api/survey/qr/${code}`,
-        byCode: (code: string) => `/api/survey/code/${code}`,
-        respond: (id: string) => `/api/survey/${id}/respond`,
-        responses: (id: string) => `/api/survey/${id}/responses`,
-        stats: (id: string) => `/api/survey/${id}/stats`,
-        active: '/api/survey/active',
-        all: '/api/surveys/all'
-    },
-    business: {
-        base: '/api/business',
-        surveys: '/api/business/survey', // Tekil
-        surveysList: '/api/business/surveys', // Çoğul
-        customers: '/api/business/customers',
-        stats: '/api/business/stats',
-        profile: '/api/business/profile',
-        createSurvey: '/api/business/survey/create',
-        updateSurvey: (id: string) => `/api/business/survey/${id}`,
-        deleteSurvey: (id: string) => `/api/business/survey/${id}`,
-        getSurvey: (id: string) => `/api/business/survey/${id}`
-    },
-    admin: {
-        base: '/api/admin',
-        users: '/api/admin/users',
-        businesses: '/api/admin/businesses',
-        stats: '/api/admin/stats',
-        logs: '/api/admin/logs',
-        surveys: '/api/admin/survey', // Tekil
-        surveysList: '/api/admin/surveys', // Çoğul
-        createSurvey: '/api/admin/survey/create',
-        updateSurvey: (id: string) => `/api/admin/survey/${id}`,
-        deleteSurvey: (id: string) => `/api/admin/survey/${id}`,
-        getSurvey: (id: string) => `/api/admin/survey/${id}`
-    },
-    customer: {
-        base: '/api/customer',
-        surveys: '/api/customer/survey', // Tekil
-        surveysList: '/api/customer/surveys', // Çoğul
-        rewards: '/api/customer/rewards',
-        profile: '/api/customer/profile',
-        history: '/api/customer/history',
-        respond: '/api/customer/survey/respond',
-        getSurvey: (id: string) => `/api/customer/survey/${id}`
-    }
-};
-
-// Alternatif endpoint'ler - yedek olarak kullanılacak
-const FALLBACK_ENDPOINTS = {
-    survey: [
-        '/api/survey',
-        '/api/surveys',
-        '/api/feedback',
-        '/api/feedbacks'
-    ],
-    business: [
-        '/api/business/survey',
-        '/api/business/surveys',
-        '/api/business/feedback',
-        '/api/business/feedbacks'
-    ],
-    admin: [
-        '/api/admin/survey',
-        '/api/admin/surveys',
-        '/api/admin/feedback',
-        '/api/admin/feedbacks'
-    ],
-    customer: [
-        '/api/customer/survey',
-        '/api/customer/surveys',
-        '/api/customer/feedback',
-        '/api/customer/feedbacks'
-    ]
-};
-
-// Anket servisleri için güncellenmiş fonksiyonlar
-const surveyService = {
-    // Tüm anketleri getir (rol bazlı)
-    getAll: async (role: UserRole) => {
-        try {
-            let endpoints;
-            switch (role) {
-                case 'SUPER_ADMIN':
-                    endpoints = [
-                        API_ENDPOINTS.admin.surveysList,
-                        ...FALLBACK_ENDPOINTS.admin
-                    ];
-                    break;
-                case 'BUSINESS_ADMIN':
-                    endpoints = [
-                        API_ENDPOINTS.business.surveysList,
-                        ...FALLBACK_ENDPOINTS.business
-                    ];
-                    break;
-                case 'CUSTOMER':
-                    endpoints = [
-                        API_ENDPOINTS.customer.surveysList,
-                        ...FALLBACK_ENDPOINTS.customer
-                    ];
-                    break;
-                default:
-                    endpoints = [
-                        API_ENDPOINTS.surveys.list,
-                        ...FALLBACK_ENDPOINTS.survey
-                    ];
-            }
-
-            let lastError;
-            // Her endpoint'i sırayla dene
-            for (const endpoint of endpoints) {
-                try {
-                    console.log(`Anketleri getirme denemesi: ${endpoint}`);
-                    const response = await apiClient.get(endpoint);
-                    return response.data;
-                } catch (error) {
-                    console.warn(`${endpoint} başarısız:`, error);
-                    lastError = error;
-                }
-            }
-
-            throw lastError || new Error('Hiçbir anket endpoint\'i çalışmıyor');
-        } catch (error) {
-            console.error('Anketleri getirme hatası:', error);
-            throw error;
-        }
-    },
-
-    // ID ile anket getir
-    getById: async (surveyId: string, role: UserRole) => {
-        try {
-            let endpoint;
-            switch (role) {
-                case 'SUPER_ADMIN':
-                    endpoint = API_ENDPOINTS.admin.getSurvey(surveyId);
-                    break;
-                case 'BUSINESS_ADMIN':
-                    endpoint = API_ENDPOINTS.business.getSurvey(surveyId);
-                    break;
-                case 'CUSTOMER':
-                    endpoint = API_ENDPOINTS.customer.getSurvey(surveyId);
-                    break;
-                default:
-                    endpoint = API_ENDPOINTS.surveys.byId(surveyId);
-            }
-
-            const response = await apiClient.get(endpoint);
-            return response.data;
-        } catch (error) {
-            console.error('ID ile anket getirme hatası:', error);
-            throw error;
-        }
-    },
-
-    // Kod ile anket getir
-    getByCode: async (code: string) => {
-        try {
-            const endpoints = [
-                API_ENDPOINTS.surveys.byCode(code),
-                `/api/survey/code/${code}`,
-                `/api/surveys/code/${code}`,
-                `/api/feedback/code/${code}`
-            ];
-
-            let lastError;
-            for (const endpoint of endpoints) {
-                try {
-                    const response = await apiClient.get(endpoint);
-                    return response.data;
-                } catch (error) {
-                    lastError = error;
-                }
-            }
-
-            throw lastError || new Error('Anket kodu ile erişim başarısız');
-        } catch (error) {
-            console.error('Kod ile anket getirme hatası:', error);
-            throw error;
-        }
-    },
-
-    // Anket yanıtı gönder
-    submitResponse: async (surveyId: string, answers: SurveyResponse) => {
-        try {
-            const endpoints = [
-                API_ENDPOINTS.surveys.respond(surveyId),
-                `/api/survey/${surveyId}/respond`,
-                `/api/surveys/${surveyId}/respond`,
-                `/api/customer/survey/respond`
-            ];
-
-            let lastError;
-            for (const endpoint of endpoints) {
-                try {
-                    const response = await apiClient.post(endpoint, answers);
-                    return response.data;
-                } catch (error) {
-                    lastError = error;
-                }
-            }
-
-            throw lastError || new Error('Anket yanıtı gönderilemedi');
-        } catch (error) {
-            console.error('Anket yanıtı gönderme hatası:', error);
-            throw error;
-        }
-    },
-
-    // QR kod ile anket getir
-    getByQR: async (qrCode: string) => {
-        try {
-            const endpoints = [
-                API_ENDPOINTS.surveys.byQR(qrCode),
-                `/api/survey/qr/${qrCode}`,
-                `/api/surveys/qr/${qrCode}`,
-                `/api/feedback/qr/${qrCode}`
-            ];
-
-            let lastError;
-            for (const endpoint of endpoints) {
-                try {
-                    const response = await apiClient.get(endpoint);
-                    return response.data;
-                } catch (error) {
-                    lastError = error;
-                }
-            }
-
-            throw lastError || new Error('QR kod ile anket erişimi başarısız');
-        } catch (error) {
-            console.error('QR kod ile anket getirme hatası:', error);
-            throw error;
-        }
-    },
-
-    // Anket yanıtlarını getir
-    getResponses: async (surveyId: string) => {
-        try {
-            const endpoints = [
-                API_ENDPOINTS.surveys.responses(surveyId),
-                `/api/survey/${surveyId}/responses`,
-                `/api/surveys/${surveyId}/responses`,
-                `/api/feedback/${surveyId}/responses`
-            ];
-
-            let lastError;
-            for (const endpoint of endpoints) {
-                try {
-                    const response = await apiClient.get(endpoint);
-                    return response.data;
-                } catch (error) {
-                    lastError = error;
-                }
-            }
-
-            throw lastError || new Error('Anket yanıtları alınamadı');
-        } catch (error) {
-            console.error('Anket yanıtlarını getirme hatası:', error);
-            throw error;
-        }
-    },
-
-    // Anket istatistiklerini getir
-    getStats: async (surveyId: string) => {
-        try {
-            const endpoints = [
-                API_ENDPOINTS.surveys.stats(surveyId),
-                `/api/survey/${surveyId}/stats`,
-                `/api/surveys/${surveyId}/stats`,
-                `/api/feedback/${surveyId}/stats`
-            ];
-
-            let lastError;
-            for (const endpoint of endpoints) {
-                try {
-                    const response = await apiClient.get(endpoint);
-                    return response.data;
-                } catch (error) {
-                    lastError = error;
-                }
-            }
-
-            throw lastError || new Error('Anket istatistikleri alınamadı');
-        } catch (error) {
-            console.error('Anket istatistiklerini getirme hatası:', error);
-            throw error;
-        }
-    }
-};
-
-// API nesnesini güncelle
+// Anket oluştur
 const api: Api = {
-    // API URL'sini döndüren yardımcı fonksiyon
-    getApiUrl: () => BASE_URL,
-
-    // API adresini değiştir
+    getApiUrl: () => currentApiUrl,
+    getCurrentApiUrl: () => currentApiUrl,
     changeApiUrl: (newUrl: string) => {
-        BASE_URL = newUrl;
+        currentApiUrl = newUrl;
         apiClient.defaults.baseURL = newUrl;
         console.log('API adresi değiştirildi:', newUrl);
         return { success: true, message: `API adresi değiştirildi: ${newUrl}`, url: newUrl };
     },
-
-    // API bağlantısını test et
     testConnection: async () => {
-        console.log('API bağlantısı test ediliyor...');
-        try {
-            const isConnected = await ensureGoodApiConnection();
-
-            if (isConnected) {
-                return {
-                    success: true,
-                    url: BASE_URL,
-                    message: `API bağlantısı başarılı: ${BASE_URL}`
-                };
-            }
-
-            return {
-                success: false,
-                url: BASE_URL,
-                message: `API bağlantısı başarısız: ${BASE_URL}`
-            };
-        } catch (error: any) {
-            console.error('API bağlantı testi hatası:', error);
-            return {
-                success: false,
-                url: BASE_URL,
-                message: "API test hatası: " + error.message
-            };
-        }
+        const status = await checkAndUpdateApiHealth();
+        return {
+            success: status.isHealthy,
+            url: status.currentUrl,
+            message: status.message
+        };
     },
-
-    // API sunucusuna ping atarak çalışıp çalışmadığını kontrol eder
     ping: async () => {
         try {
-            console.log(`Ping testi: ${BASE_URL}`);
-            const isReachable = await isUrlReachable(BASE_URL);
+            console.log(`Ping testi: ${currentApiUrl}`);
+            const isReachable = await isUrlReachable(currentApiUrl);
 
             if (isReachable) {
-                return { success: true, message: `API sunucusu aktif: ${BASE_URL}` };
+                return { success: true, message: `API sunucusu aktif: ${currentApiUrl}` };
             }
 
-            // Alternatif URL'leri dene
             const workingUrl = await findWorkingApiUrl();
             if (workingUrl) {
-                BASE_URL = workingUrl;
+                currentApiUrl = workingUrl;
                 apiClient.defaults.baseURL = workingUrl;
                 return { success: true, message: `API sunucusu aktif: ${workingUrl}` };
             }
 
             return {
                 success: false,
-                message: `API sunucusuna erişilemiyor: ${BASE_URL}`
+                message: `API sunucusuna erişilemiyor: ${currentApiUrl}`
             };
         } catch (error) {
             console.error('API sunucusuna bağlanılamadı:', error);
@@ -864,34 +583,76 @@ const api: Api = {
             };
         }
     },
-
-    // Kullanıcı girişi
+    getApiHealthStatus: () => ({ ...apiHealthStatus }),
+    getLastSuccessfulApiUrl: () => lastSuccessfulUrl,
     login: async (email: string, password: string) => {
         try {
-            const response = await apiClient.post('/api/auth/login', { email, password });
+            const normalizedEmail = email.toLowerCase().trim();
 
-            // Token'ı kaydet
-            if (response.data.token) {
-                await AsyncStorage.setItem('userToken', response.data.token);
-                console.log('Token kaydedildi');
+            const response = await apiClient.post('/api/auth/login', {
+                email: normalizedEmail,
+                password
+            });
+
+            if (response.status === 200 && response.data) {
+                if (!response.data.token) {
+                    throw new Error('Token alınamadı');
+                }
+
+                const userData = response.data.user || response.data.data;
+                if (!userData) {
+                    throw new Error('Kullanıcı bilgileri alınamadı');
+                }
+
+                let userRole = userData.role?.toUpperCase();
+                if (!userRole) {
+                    userRole = 'CUSTOMER';
+                }
+
+                return {
+                    success: true,
+                    token: response.data.token,
+                    data: {
+                        ...userData,
+                        role: userRole
+                    }
+                };
+            } else {
+                throw new Error(response.data?.message || 'Giriş başarısız');
+            }
+        } catch (error: any) {
+            console.error('Login hatası:', error);
+
+            let errorMessage = 'Giriş yapılırken bir hata oluştu';
+            if (error.response) {
+                switch (error.response.status) {
+                    case 401:
+                        errorMessage = 'Geçersiz kullanıcı adı veya şifre';
+                        break;
+                    case 404:
+                        errorMessage = 'Kullanıcı bulunamadı';
+                        break;
+                    case 403:
+                        errorMessage = 'Hesabınız kilitlendi. Lütfen yönetici ile iletişime geçin';
+                        break;
+                    default:
+                        errorMessage = error.response.data?.message || 'Sunucu hatası';
+                }
             }
 
-            return response.data;
-        } catch (error) {
-            throw error;
+            return {
+                success: false,
+                error: errorMessage
+            };
         }
     },
-
-    // Kullanıcı kaydı
     register: async (userData: { name: string; email: string; password: string }) => {
         try {
-            // E-postayı küçük harfe çevir
             const normalizedUserData = {
                 ...userData,
                 email: userData.email ? userData.email.toLowerCase().trim() : ''
             };
 
-            // API bağlantısını kontrol et
             await ensureGoodApiConnection();
 
             const response = await apiClient.post('/api/auth/register', normalizedUserData);
@@ -901,8 +662,6 @@ const api: Api = {
             throw error;
         }
     },
-
-    // Kullanıcı profil bilgilerini getir
     getUserProfile: async () => {
         try {
             const response = await apiClient.get('/api/auth/profile');
@@ -911,14 +670,10 @@ const api: Api = {
             throw error;
         }
     },
-
-    // Anketleri getir
     getFeedbacks: async (token: string) => {
         try {
-            // API bağlantısını kontrol et
             await ensureGoodApiConnection();
 
-            // Tüm olası endpoints
             const endpoints = [
                 '/api/surveys',
                 '/api/feedbacks',
@@ -930,7 +685,6 @@ const api: Api = {
 
             let lastError = null;
 
-            // Her bir endpoint'i sırayla dene
             for (const endpoint of endpoints) {
                 try {
                     console.log(`Anketleri getirme denemesi: ${endpoint}`);
@@ -938,7 +692,7 @@ const api: Api = {
                         headers: {
                             Authorization: `Bearer ${token}`,
                         },
-                        timeout: 60000 // 60 saniye (artırıldı)
+                        timeout: 60000
                     });
 
                     console.log(`${endpoint} başarılı, veri alındı`);
@@ -946,17 +700,14 @@ const api: Api = {
                 } catch (endpointError: any) {
                     console.warn(`${endpoint} başarısız: ${endpointError.message}`);
                     lastError = endpointError;
-                    // Devam et ve bir sonraki endpoint'i dene
                 }
             }
 
-            // Hiçbir endpoint çalışmadıysa, son hatayı fırlat
             console.error("Hiçbir anket API endpointi çalışmıyor");
             throw lastError || new Error('Hiçbir anket API endpointi çalışmıyor');
         } catch (error: any) {
             console.error('Anket getirme hatası:', error);
 
-            // Hata mesajını daha ayrıntılı oluştur
             let errorMessage = 'Anket verileri alınamadı';
 
             if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
@@ -974,61 +725,75 @@ const api: Api = {
             throw new Error(errorMessage);
         }
     },
-
-    // Anket oluştur
     createFeedback: async (token: string, feedbackData: any) => {
         try {
-            // API bağlantısını kontrol et
             await ensureGoodApiConnection();
+
+            // Benzersiz kod oluştur
+            const uniqueCode = generateUniqueCode();
+
+            // Anket verisini hazırla
+            const surveyData = {
+                title: feedbackData.title,
+                description: feedbackData.description,
+                startDate: feedbackData.startDate,
+                endDate: feedbackData.endDate,
+                questions: feedbackData.questions,
+                business: feedbackData.business,
+                createdBy: feedbackData.business,
+                codes: [{
+                    value: uniqueCode,
+                    type: 'custom',
+                    isActive: true,
+                    createdAt: new Date().toISOString()
+                }],
+                accessCodes: [uniqueCode]
+            };
+
+            // Veriyi kontrol et
+            if (!surveyData.codes || !surveyData.codes[0]?.value) {
+                throw new Error('Anket kodu oluşturulamadı');
+            }
+
+            // Veriyi logla
+            console.log('Gönderilen anket verisi:', JSON.stringify(surveyData, null, 2));
 
             try {
                 // Önce /api/surveys endpoint'ini dene
-                const response = await apiClient.post('/api/surveys', feedbackData, {
+                const response = await apiClient.post('/api/surveys', surveyData, {
                     headers: {
                         Authorization: `Bearer ${token}`,
-                    },
-                    timeout: 30000
+                        'Content-Type': 'application/json'
+                    }
                 });
                 return response.data;
             } catch (surveyError: any) {
-                // Eğer 404 hatası alırsak, alternatif endpoint'i dene
-                if (surveyError.response && surveyError.response.status === 404) {
-                    console.log('surveys endpoint bulunamadı, feedbacks endpoint deneniyor...');
-                    const altResponse = await apiClient.post('/api/feedbacks', feedbackData, {
+                console.error('İlk endpoint hatası:', surveyError.response?.data || surveyError.message);
+
+                // İlk endpoint başarısız olursa /api/feedbacks endpoint'ini dene
+                try {
+                    const altResponse = await apiClient.post('/api/feedbacks', surveyData, {
                         headers: {
                             Authorization: `Bearer ${token}`,
-                        },
-                        timeout: 30000
+                            'Content-Type': 'application/json'
+                        }
                     });
                     return altResponse.data;
+                } catch (feedbackError: any) {
+                    console.error('İkinci endpoint hatası:', feedbackError.response?.data || feedbackError.message);
+                    throw new Error('Anket oluşturulamadı. Lütfen daha sonra tekrar deneyin.');
                 }
-                // Başka bir hata varsa yeniden fırlat
-                throw surveyError;
             }
         } catch (error: any) {
             console.error('Anket oluşturma hatası:', error);
-
-            // Hata mesajını daha ayrıntılı oluştur
-            let errorMessage = 'Anket oluşturulamadı';
-
-            if (error.response && error.response.status === 404) {
-                errorMessage = 'Anket oluşturma API endpoint\'i bulunamadı.';
-            } else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
-                errorMessage = 'Anket oluşturma işlemi zaman aşımına uğradı.';
-            }
-
-            throw new Error(errorMessage);
+            throw error;
         }
     },
-
-    // Anket sil
     deleteFeedback: async (token: string, id: string) => {
         try {
-            // API bağlantısını kontrol et
             await ensureGoodApiConnection();
 
             try {
-                // Önce surveys endpoint'ini dene
                 const response = await apiClient.delete(`/api/surveys/${id}`, {
                     headers: {
                         Authorization: `Bearer ${token}`,
@@ -1036,7 +801,6 @@ const api: Api = {
                 });
                 return response.data;
             } catch (surveyError: any) {
-                // Eğer 404 hatası alırsak, alternatif endpoint'i dene
                 if (surveyError.response && surveyError.response.status === 404) {
                     console.log('surveys endpoint bulunamadı, feedbacks endpoint deneniyor...');
                     const altResponse = await apiClient.delete(`/api/feedbacks/${id}`, {
@@ -1046,7 +810,6 @@ const api: Api = {
                     });
                     return altResponse.data;
                 }
-                // Başka bir hata varsa yeniden fırlat
                 throw surveyError;
             }
         } catch (error: any) {
@@ -1060,14 +823,10 @@ const api: Api = {
             throw new Error(errorMessage);
         }
     },
-
-    // İşletmeleri getir
     getBusinesses: async (token: string) => {
         try {
-            // API bağlantısını kontrol et
             await ensureGoodApiConnection();
 
-            // İşletmeleri getirmek için alternatif endpointleri dene
             const endpoints = [
                 '/api/businesses',
                 '/api/business',
@@ -1076,7 +835,6 @@ const api: Api = {
             ];
 
             let lastError;
-            // Her bir endpoint'i sırayla dene
             for (const endpoint of endpoints) {
                 try {
                     console.log(`İşletmeleri getirmek için ${endpoint} deneniyor...`);
@@ -1086,26 +844,19 @@ const api: Api = {
                         }
                     });
 
-                    // API yanıtı formatını kontrol et
                     let businessData;
 
                     if (Array.isArray(response.data)) {
-                        // Direkt dizi döndüyse
                         businessData = response.data;
                     } else if (response.data && response.data.data && Array.isArray(response.data.data)) {
-                        // { data: [...] } formatında
                         businessData = response.data.data;
                     } else if (response.data && response.data.businesses && Array.isArray(response.data.businesses)) {
-                        // { businesses: [...] } formatında
                         businessData = response.data.businesses;
                     } else if (response.data && response.data.items && Array.isArray(response.data.items)) {
-                        // { items: [...] } formatında
                         businessData = response.data.items;
                     } else if (response.data && response.data.results && Array.isArray(response.data.results)) {
-                        // { results: [...] } formatında
                         businessData = response.data.results;
                     } else {
-                        // Bilinmeyen format, muhtemelen boş
                         console.warn(`${endpoint} işletme verisi beklenmeyen formatta:`, response.data);
                         businessData = [];
                     }
@@ -1116,11 +867,9 @@ const api: Api = {
                     lastError = endpointError;
                     console.warn(`${endpoint} işletme hatası:`,
                         endpointError.response?.status || endpointError.message);
-                    // Bir sonraki endpoint'i dene
                 }
             }
 
-            // Hiçbir endpoint başarılı olmadıysa, hata fırlat
             console.error('Hiçbir işletme endpointi başarılı olmadı');
             throw lastError || new Error("İşletme verileri alınamadı. API sunucusuna bağlanılamadı.");
         } catch (error: any) {
@@ -1128,14 +877,10 @@ const api: Api = {
             throw error;
         }
     },
-
-    // İşletme bilgisi
     getBusiness: async (token: string, id: string) => {
         try {
-            // API bağlantısını kontrol et
             await ensureGoodApiConnection();
 
-            // Olası endpoint'ler
             const endpoints = [
                 `/api/businesses/${id}`,
                 `/api/business/${id}`,
@@ -1145,7 +890,6 @@ const api: Api = {
 
             let lastError = null;
 
-            // Her bir endpoint'i dene
             for (const endpoint of endpoints) {
                 try {
                     console.log(`İşletme bilgisi alınıyor: ${endpoint}`);
@@ -1153,7 +897,7 @@ const api: Api = {
                         headers: {
                             Authorization: `Bearer ${token}`,
                         },
-                        timeout: 60000 // 60 saniye
+                        timeout: 60000
                     });
 
                     console.log(`${endpoint} başarılı, işletme bilgisi alındı`);
@@ -1161,22 +905,17 @@ const api: Api = {
                 } catch (endpointError: any) {
                     console.warn(`${endpoint} başarısız:`, endpointError.message);
                     lastError = endpointError;
-                    // Devam et ve sonraki endpoint'i dene
                 }
             }
 
-            // Hiçbir endpoint çalışmadıysa, son hatayı fırlat
             throw lastError || new Error('Hiçbir işletme API endpointi çalışmıyor');
         } catch (error) {
             console.error('İşletme detayı getirme hatası:', error);
             throw error;
         }
     },
-
-    // İşletme oluştur
     createBusiness: async (token: string, businessData: any) => {
         try {
-            // API bağlantısını kontrol et
             await ensureGoodApiConnection();
 
             const response = await apiClient.post('/api/businesses', businessData, {
@@ -1190,11 +929,8 @@ const api: Api = {
             throw error;
         }
     },
-
-    // İşletme güncelle
     updateBusiness: async (token: string, id: string, businessData: any) => {
         try {
-            // API bağlantısını kontrol et
             await ensureGoodApiConnection();
 
             const response = await apiClient.put(`/api/businesses/${id}`, businessData, {
@@ -1208,11 +944,8 @@ const api: Api = {
             throw error;
         }
     },
-
-    // İşletme sil
     deleteBusiness: async (token: string, id: string) => {
         try {
-            // API bağlantısını kontrol et
             await ensureGoodApiConnection();
 
             const response = await apiClient.delete(`/api/businesses/${id}`, {
@@ -1226,11 +959,8 @@ const api: Api = {
             throw error;
         }
     },
-
-    // Kullanıcı listesi
     getUsers: async (token: string) => {
         try {
-            // API bağlantısını kontrol et
             await ensureGoodApiConnection();
 
             try {
@@ -1249,11 +979,8 @@ const api: Api = {
             throw error;
         }
     },
-
-    // Kullanıcı oluştur
     createUser: async (token: string, userData: any) => {
         try {
-            // API bağlantısını kontrol et
             await ensureGoodApiConnection();
 
             const response = await apiClient.post('/api/users', userData, {
@@ -1267,11 +994,8 @@ const api: Api = {
             throw error;
         }
     },
-
-    // Kullanıcı güncelle
     updateUser: async (token: string, id: string, userData: any) => {
         try {
-            // API bağlantısını kontrol et
             await ensureGoodApiConnection();
 
             const response = await apiClient.put(`/api/users/${id}`, userData, {
@@ -1285,11 +1009,8 @@ const api: Api = {
             throw error;
         }
     },
-
-    // Kullanıcı sil
     deleteUser: async (token: string, id: string) => {
         try {
-            // API bağlantısını kontrol et
             await ensureGoodApiConnection();
 
             const response = await apiClient.delete(`/api/users/${id}`, {
@@ -1303,17 +1024,13 @@ const api: Api = {
             throw error;
         }
     },
-
-    // Gösterge paneli istatistiklerini getir
     getDashboardStats: async (token: string) => {
         try {
-            // API bağlantısını kontrol et
             const isConnected = await ensureGoodApiConnection();
             if (!isConnected) {
                 throw new Error("API sunucusuna bağlanılamadı, lütfen internet bağlantınızı kontrol edin");
             }
 
-            // Alternatif endpoint'leri dene
             const endpoints = [
                 '/api/dashboard/stats',
                 '/api/stats',
@@ -1324,40 +1041,29 @@ const api: Api = {
             ];
 
             let lastError;
-            // Her bir endpoint'i sırayla dene
             for (const endpoint of endpoints) {
                 try {
                     console.log(`İstatistik almak için ${endpoint} deneniyor...`);
-                    const result = await apiRequest('get', endpoint, token);
+                    const result = await apiClient.get(endpoint, {
+                        headers: {
+                            Authorization: `Bearer ${token}`,
+                        }
+                    });
                     console.log(`${endpoint} başarılı, istatistik verileri alındı`);
-                    return result;
+                    return result.data;
                 } catch (endpointError: any) {
                     lastError = endpointError;
                     console.warn(`${endpoint} istatistik hatası:`,
                         endpointError.response?.status || endpointError.message);
-                    // Bir sonraki endpoint'i dene
                 }
             }
 
-            // Hiçbir endpoint çalışmadıysa, hatayı fırlat
             throw lastError || new Error("İstatistik verileri alınamadı. API sunucusuna bağlanılamadı.");
         } catch (error: any) {
             console.error('İstatistik getirme hatası:', error);
             throw error;
         }
     },
-
-    // API sağlık durumu bilgisi
-    getApiHealthStatus: () => {
-        return { ...apiHealthStatus }; // Kopya döndür
-    },
-
-    // Son başarılı çalışan API URL'sini döndür
-    getLastSuccessfulApiUrl: () => {
-        return lastSuccessfulApiUrl;
-    },
-
-    // Anket servisleri
     getSurveyByQRCode: async (qrId: string) => {
         try {
             const response = await apiClient.get(`/api/surveys/access/${qrId}`);
@@ -1366,7 +1072,6 @@ const api: Api = {
             throw error;
         }
     },
-
     getBusinessSurveys: async () => {
         try {
             const response = await apiClient.get('/api/business/surveys');
@@ -1375,16 +1080,6 @@ const api: Api = {
             throw error;
         }
     },
-
-    submitSurveyResponse: async (surveyId: string, answers: any) => {
-        try {
-            const response = await apiClient.post(`/api/surveys/${surveyId}/respond`, answers);
-            return response.data;
-        } catch (error) {
-            throw error;
-        }
-    },
-
     getSurveyResponses: async (surveyId: string) => {
         try {
             const response = await apiClient.get(`/api/surveys/${surveyId}/responses`);
@@ -1393,14 +1088,10 @@ const api: Api = {
             throw error;
         }
     },
-
-    // Aktif anketleri getir (müşteriler için)
     getActiveSurveys: async () => {
         try {
-            // API bağlantısını kontrol et
             await ensureGoodApiConnection();
 
-            // Olası endpoint'ler
             const endpoints = [
                 '/api/surveys/active',
                 '/api/active-surveys',
@@ -1410,7 +1101,6 @@ const api: Api = {
 
             let lastError = null;
 
-            // Her bir endpoint'i dene
             for (const endpoint of endpoints) {
                 try {
                     console.log(`Aktif anketler alınıyor: ${endpoint}`);
@@ -1420,83 +1110,231 @@ const api: Api = {
                 } catch (endpointError: any) {
                     console.warn(`${endpoint} başarısız:`, endpointError.message);
                     lastError = endpointError;
-                    // Devam et ve sonraki endpoint'i dene
                 }
             }
 
-            // Hiçbir endpoint çalışmadıysa, son hatayı fırlat
             throw lastError || new Error('Aktif anketler alınamadı');
         } catch (error: any) {
             console.error('Aktif anketleri getirme hatası:', error);
             throw error;
         }
     },
-
-    surveys: surveyService,
-
-    // İşletme servisleri
-    business: {
-        getProfile: async () => {
+    surveys: {
+        getAll: async (role: UserRole) => {
             try {
-                const response = await apiClient.get(API_ENDPOINTS.business.profile);
-                return response.data;
+                let endpoints;
+                switch (role) {
+                    case 'SUPER_ADMIN':
+                        endpoints = [
+                            '/api/admin/surveys',
+                            '/api/admin/surveys',
+                            '/api/admin/surveys'
+                        ];
+                        break;
+                    case 'BUSINESS_ADMIN':
+                        endpoints = [
+                            '/api/business/surveys',
+                            '/api/business/surveys',
+                            '/api/business/surveys'
+                        ];
+                        break;
+                    case 'CUSTOMER':
+                        endpoints = [
+                            '/api/customer/surveys',
+                            '/api/customer/surveys',
+                            '/api/customer/surveys'
+                        ];
+                        break;
+                    default:
+                        endpoints = [
+                            '/api/surveys',
+                            '/api/survey',
+                            '/api/feedback',
+                            '/api/forms'
+                        ];
+                }
+
+                let lastError;
+                for (const endpoint of endpoints) {
+                    try {
+                        console.log(`Anketleri getirme denemesi: ${endpoint}`);
+                        const response = await apiClient.get(endpoint);
+                        return response.data;
+                    } catch (error) {
+                        console.warn(`${endpoint} başarısız:`, error);
+                        lastError = error;
+                    }
+                }
+
+                throw lastError || new Error('Hiçbir anket endpoint\'i çalışmıyor');
             } catch (error) {
-                console.error('İşletme profili getirme hatası:', error);
+                console.error('Anketleri getirme hatası:', error);
                 throw error;
             }
         },
-
-        getStats: async () => {
+        getById: async (surveyId: string, role: UserRole) => {
             try {
-                const response = await apiClient.get(API_ENDPOINTS.business.stats);
+                let endpoint;
+                switch (role) {
+                    case 'SUPER_ADMIN':
+                        endpoint = '/api/admin/surveys';
+                        break;
+                    case 'BUSINESS_ADMIN':
+                        endpoint = '/api/business/surveys';
+                        break;
+                    case 'CUSTOMER':
+                        endpoint = '/api/customer/surveys';
+                        break;
+                    default:
+                        endpoint = '/api/surveys';
+                }
+
+                const response = await apiClient.get(`${endpoint}/${surveyId}`);
                 return response.data;
             } catch (error) {
-                console.error('İşletme istatistikleri getirme hatası:', error);
+                console.error('ID ile anket getirme hatası:', error);
                 throw error;
             }
         },
-
-        getCustomers: async () => {
+        getByQR: async (qrCode: string) => {
             try {
-                const response = await apiClient.get(API_ENDPOINTS.business.customers);
+                const response = await apiClient.get(`/api/surveys/qr/${qrCode}`);
                 return response.data;
             } catch (error) {
-                console.error('Müşteri listesi getirme hatası:', error);
+                throw error;
+            }
+        },
+        getByCode: async (code: string) => {
+            try {
+                const response = await apiClient.get(`/api/surveys/code/${code}`);
+                return response.data;
+            } catch (error) {
+                throw error;
+            }
+        },
+        getResponses: async (surveyId: string) => {
+            try {
+                const response = await apiClient.get(`/api/surveys/${surveyId}/responses`);
+                return response.data;
+            } catch (error) {
+                throw error;
+            }
+        },
+        getStats: async (surveyId: string) => {
+            try {
+                const response = await apiClient.get(`/api/surveys/${surveyId}/stats`);
+                return response.data;
+            } catch (error) {
+                throw error;
+            }
+        },
+        recordScan: async (code: string) => {
+            try {
+                const response = await apiClient.post('/api/surveys/qr/scan', { code });
+                return response.data;
+            } catch (error) {
                 throw error;
             }
         }
     },
-
-    // Müşteri servisleri
+    business: {
+        getProfile: async () => {
+            try {
+                const response = await apiClient.get('/api/business/profile');
+                return response.data;
+            } catch (error) {
+                throw error;
+            }
+        },
+        getStats: async () => {
+            try {
+                const response = await apiClient.get('/api/business/stats');
+                return response.data;
+            } catch (error) {
+                throw error;
+            }
+        },
+        getCustomers: async () => {
+            try {
+                const response = await apiClient.get('/api/business/customers');
+                return response.data;
+            } catch (error) {
+                throw error;
+            }
+        }
+    },
     customer: {
         getProfile: async () => {
             try {
-                const response = await apiClient.get(API_ENDPOINTS.customer.profile);
+                const response = await apiClient.get('/api/customer/profile');
                 return response.data;
             } catch (error) {
-                console.error('Müşteri profili getirme hatası:', error);
                 throw error;
             }
         },
-
         getRewards: async () => {
             try {
-                const response = await apiClient.get(API_ENDPOINTS.customer.rewards);
+                const response = await apiClient.get('/api/customer/rewards');
                 return response.data;
             } catch (error) {
-                console.error('Ödül bilgileri getirme hatası:', error);
                 throw error;
             }
         },
-
         getHistory: async () => {
             try {
-                const response = await apiClient.get(API_ENDPOINTS.customer.history);
+                const response = await apiClient.get('/api/customer/history');
                 return response.data;
             } catch (error) {
-                console.error('Geçmiş anket bilgileri getirme hatası:', error);
                 throw error;
             }
+        }
+    },
+    submitSurveyResponse: async (surveyId: string, answers: any[], customer?: any) => {
+        try {
+            await ensureGoodApiConnection();
+
+            // Veri formatını hazırla ve kontrol et
+            const responseData: any = {
+                survey: surveyId,
+                answers: answers
+            };
+
+            // Müşteri bilgisi varsa ekle
+            if (customer) {
+                responseData.customer = customer;
+            }
+
+            console.log(`Anket yanıtı gönderiliyor (${surveyId}):`, JSON.stringify(responseData, null, 2));
+
+            // Tüm API istek header'larına token ekleme
+            const token = await AsyncStorage.getItem('userToken');
+            const headers: any = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            };
+
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+
+            // API çağrısı yap
+            const response = await fetch(`${currentApiUrl}/surveys/${surveyId}/responses`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(responseData)
+            });
+
+            // Başarısız HTTP durum kodları için hata fırlat
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || `HTTP Hata: ${response.status}`);
+            }
+
+            // Başarılı yanıtı döndür
+            return await response.json();
+        } catch (error) {
+            console.error('Anket yanıtı gönderirken hata:', error);
+            throw error;
         }
     }
 };
@@ -1505,7 +1343,10 @@ const api: Api = {
 (async () => {
     console.log("API URL: İlk başlatma testi yapılıyor");
     await ensureGoodApiConnection();
-    console.log('API URL:', BASE_URL);
+    console.log('API URL:', currentApiUrl);
 })();
+
+// Uygulamanın başlangıcında API sağlık monitörünü başlat
+setTimeout(startApiHealthMonitor, 1000);
 
 export default api; 

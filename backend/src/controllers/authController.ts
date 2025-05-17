@@ -4,6 +4,8 @@ import jwt from 'jsonwebtoken';
 import User from '../models/User';
 import { UserRole } from '../types/UserRole';
 import Business from '../models/Business';
+import ResponseModel from '../models/Response';
+import mongoose from 'mongoose';
 
 // Token oluşturma fonksiyonu
 const generateToken = (id: string): string => {
@@ -119,7 +121,10 @@ export const login = async (req: Request, res: Response) => {
         // Gerekli alanların kontrolü
         if (!email || !password) {
             console.error('GİRİŞ HATASI: Email veya şifre eksik');
-            return res.status(400).json({ message: 'Email ve şifre alanları zorunludur' });
+            return res.status(400).json({
+                success: false,
+                message: 'Email ve şifre alanları zorunludur'
+            });
         }
 
         try {
@@ -214,6 +219,15 @@ export const login = async (req: Request, res: Response) => {
                         }
                     }
 
+                    // Kullanıcının rolüne göre izin kontrolü
+                    if (user.role === UserRole.CUSTOMER) {
+                        console.log('MÜŞTERİ GİRİŞİ BAŞARILI');
+                    } else if (user.role === UserRole.BUSINESS_ADMIN) {
+                        console.log('İŞLETME ADMİN GİRİŞİ BAŞARILI');
+                    } else if (user.role === UserRole.SUPER_ADMIN) {
+                        console.log('SÜPER ADMİN GİRİŞİ BAŞARILI');
+                    }
+
                     // Giriş başarılı
                     console.log('GİRİŞ BAŞARILI. Kullanıcı:', {
                         id: user._id,
@@ -223,11 +237,21 @@ export const login = async (req: Request, res: Response) => {
                     });
                     console.log('---------------------------------------');
 
-                    return res.json({
+                    // Yanıt nesnesini daha güvenli hale getir
+                    const safeResponse = {
                         success: true,
                         token,
-                        data: userData
-                    });
+                        data: {
+                            _id: userData._id.toString(),
+                            name: userData.name,
+                            email: userData.email,
+                            role: userData.role,
+                            business: userData.business ? userData.business.toString() : null,
+                            isActive: userData.isActive
+                        }
+                    };
+
+                    return res.status(200).json(safeResponse);
                 } else {
                     console.error('GİRİŞ HATASI: Şifre yanlış');
                 }
@@ -276,11 +300,21 @@ export const login = async (req: Request, res: Response) => {
                         });
                         console.log('---------------------------------------');
 
-                        return res.json({
+                        // Yanıt nesnesini güvenli hale getir
+                        const safeResponse = {
                             success: true,
                             token,
-                            data: adminData
-                        });
+                            data: {
+                                _id: adminData._id.toString(),
+                                name: adminData.name,
+                                email: adminData.email,
+                                role: adminData.role,
+                                business: adminData.business ? adminData.business.toString() : null,
+                                isActive: adminData.isActive
+                            }
+                        };
+
+                        return res.status(200).json(safeResponse);
                     } else {
                         console.log('Admin hesabı bulunamadı, otomatik oluşturuluyor...');
 
@@ -319,11 +353,21 @@ export const login = async (req: Request, res: Response) => {
                         });
                         console.log('---------------------------------------');
 
-                        return res.json({
+                        // Yanıt nesnesini güvenli hale getir
+                        const safeResponse = {
                             success: true,
                             token,
-                            data: adminData
-                        });
+                            data: {
+                                _id: adminData._id.toString(),
+                                name: adminData.name,
+                                email: adminData.email,
+                                role: adminData.role,
+                                business: adminData.business ? adminData.business.toString() : null,
+                                isActive: adminData.isActive
+                            }
+                        };
+
+                        return res.status(200).json(safeResponse);
                     }
                 } else {
                     console.error('İŞLETME GİRİŞİ HATASI: Şifre yanlış');
@@ -344,14 +388,18 @@ export const login = async (req: Request, res: Response) => {
         } catch (innerError: any) {
             console.error('Giriş işlemi hatası (iç):', innerError.message);
             console.error('Stack:', innerError.stack);
-            throw innerError;
+            return res.status(500).json({
+                success: false,
+                message: 'Giriş işlemi sırasında bir hata oluştu',
+                error: innerError.message
+            });
         }
     } catch (error: any) {
         console.error('Giriş işlemi hatası (dış):', error.message);
         console.error('Stack:', error.stack);
         console.log('---------------------------------------');
 
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: 'Giriş işlemi sırasında bir hata oluştu',
             error: error.message
@@ -510,5 +558,141 @@ export const createSuperAdmin = async (req: Request, res: Response) => {
     } catch (error) {
         console.error('Super Admin oluşturma hatası:', error);
         res.status(500).json({ message: 'Super Admin oluşturulurken bir hata oluştu' });
+    }
+};
+
+// @desc    İşletmeye ait müşterileri getir
+// @route   GET /api/users/business/:businessId/customers
+// @access  Private - Business Admin
+export const getBusinessCustomers = async (req: Request, res: Response) => {
+    try {
+        const { businessId } = req.params;
+
+        console.log(`İşletme ID: ${businessId} için müşterileri getirme isteği`);
+
+        // İşletme mevcut mu kontrol et
+        const business = await Business.findById(businessId);
+        if (!business) {
+            console.error(`İşletme bulunamadı: ${businessId}`);
+            return res.status(404).json({
+                success: false,
+                message: 'İşletme bulunamadı'
+            });
+        }
+
+        console.log(`İşletme bulundu: ${business.name}`);
+
+        // Önce işletmeye ait yanıtları bul
+        const responses = await ResponseModel.find({ business: businessId })
+            .populate({
+                path: 'survey',
+                select: 'title description rewardPoints'
+            })
+            .sort({ createdAt: -1 });
+
+        console.log(`${responses.length} adet yanıt bulundu`);
+
+        // Müşteri bilgilerini toplamak için bir map oluştur - String key kullanacağız
+        const customerMap = new Map<string, any>();
+
+        // Her yanıtı işle ve müşteri bilgilerini topla
+        for (let index = 0; index < responses.length; index++) {
+            try {
+                const response = responses[index];
+
+                // Müşteri bilgilerini farklı kaynaklardan topla
+                let customerName = '';
+                let customerEmail = '';
+                let customerId = '';
+
+                // Müşteri bilgilerini al
+                if (response.customer) {
+                    if (typeof response.customer === 'object') {
+                        // Nesne olarak gelen müşteri
+                        if (response.customer._id) {
+                            customerId = response.customer._id.toString();
+                        }
+                        customerName = response.customer.name || '';
+                        customerEmail = response.customer.email || '';
+                    } else if (typeof response.customer === 'string') {
+                        // ID olarak gelen müşteri
+                        customerId = response.customer;
+                    }
+                }
+
+                // Veri yoksa diğer alanlardan tamamla
+                if (!customerName) {
+                    customerName = response.customerName || `Müşteri-${index + 1}`;
+                }
+                if (!customerEmail) {
+                    customerEmail = response.customerEmail || '';
+                }
+
+                // Benzersiz bir anahtar oluştur
+                // ObjectId'den kaçınmak için string olarak kullan
+                const customerKey = customerEmail || customerName || `müşteri-${index}`;
+
+                if (!customerKey) {
+                    console.log(`Yanıt #${index} için geçerli müşteri bilgisi bulunamadı, atlanıyor`);
+                    continue;  // Geçersiz müşteri, sonraki iterasyona geç
+                }
+
+                // Puan bilgisini al
+                const rewardPoints = response.rewardPoints ||
+                    (response.survey && typeof response.survey === 'object' &&
+                        'rewardPoints' in response.survey ? response.survey.rewardPoints : 0);
+
+                // Müşteri daha önce eklenmiş mi kontrol et
+                if (!customerMap.has(customerKey)) {
+                    // Yeni müşteri ekle - ObjectId kullanmayacağız
+                    const customerObj = {
+                        _id: customerKey,  // String tabanlı ID kullan, ObjectId'den kaçın
+                        name: customerName,
+                        email: customerEmail,
+                        points: rewardPoints,
+                        completedSurveys: 1
+                    };
+
+                    customerMap.set(customerKey, customerObj);
+                    console.log(`Yeni müşteri eklendi: ${customerName}, Key: ${customerKey}, Puan: ${rewardPoints}`);
+                } else {
+                    // Mevcut müşteriyi güncelle
+                    const customer = customerMap.get(customerKey);
+                    const updatedCustomer = {
+                        ...customer,
+                        points: (customer.points || 0) + rewardPoints,
+                        completedSurveys: (customer.completedSurveys || 0) + 1
+                    };
+
+                    customerMap.set(customerKey, updatedCustomer);
+                    console.log(`Müşteri güncellendi: ${customerName}, Toplam puan: ${updatedCustomer.points}`);
+                }
+            } catch (err) {
+                console.error(`Yanıt #${index} işlenirken hata oluştu:`, err);
+                // Hata oluştuğunda döngüyü kesme, diğer yanıtları işlemeye devam et
+            }
+        }
+
+        console.log(`${customerMap.size} eşsiz müşteri bulundu`);
+
+        // Müşteri haritasını diziye dönüştür
+        const customers = Array.from(customerMap.values());
+
+        // Kontrol amaçlı ilk müşteriyi logla
+        if (customers.length > 0) {
+            console.log('İlk müşteri örneği:', JSON.stringify(customers[0], null, 2));
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: customers
+        });
+    } catch (error: any) {
+        console.error('İşletme müşterilerini getirme hatası:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Müşteri listesi getirilirken bir hata oluştu',
+            error: error.message
+        });
     }
 }; 

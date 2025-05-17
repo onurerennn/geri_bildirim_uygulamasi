@@ -20,18 +20,14 @@ export interface Question {
 }
 
 export interface SurveyResponse {
-    survey: string;
+    surveyId: string;
     answers: Answer[];
-    customer: {
-        name: string;
-        email?: string;
-        _id?: string;
-    };
-    business?: string | { _id: string; name?: string;[key: string]: any };
+    customer?: string;
+    createdAt?: string;
+    code?: string;
 }
 
 export interface Answer {
-    question: string;
-    questionId?: string;
-    value: string | number | boolean;
+    questionId: string;
+    value: string | number;
 } 

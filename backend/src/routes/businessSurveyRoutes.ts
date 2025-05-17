@@ -10,6 +10,7 @@ import {
     getBusinessSurveys,
     createSurvey
 } from '../controllers/surveyController';
+import mongoose from 'mongoose';
 
 const router = express.Router();
 
@@ -35,8 +36,14 @@ router.get('/surveys', protect, (req, res, next) => {
 
     // Son çare: id'den türet
     if (!req.params.businessId && req.user && req.user.id) {
-        req.params.businessId = req.user.id + '_business';
-        console.log('Business ID kullanıcı ID\'sinden türetildi:', req.params.businessId);
+        // Eğer ID ObjectId formatındaysa direkt kullan
+        if (mongoose.Types.ObjectId.isValid(req.user.id)) {
+            req.params.businessId = req.user.id;
+        } else {
+            // Değilse yeni bir ObjectId oluştur
+            req.params.businessId = new mongoose.Types.ObjectId().toString();
+        }
+        console.log('Business ID kullanıcı ID\'sinden alındı:', req.params.businessId);
     }
 
     next();
@@ -46,7 +53,7 @@ router.get('/surveys', protect, (req, res, next) => {
 router.get('/surveys/all', protect, flexibleRoleCheck, getBusinessSurveys);
 
 // İşletmeye ait anket oluşturma endpoint'i - esnek yetki kontrolü ile
-router.post('/surveys', protect, flexibleRoleCheck, createSurvey);
+router.post('/create-survey', protect, flexibleRoleCheck, createSurvey);
 
 // Debug için anket oluşturma - develop aşamasında kullanılabilir
 router.post('/surveys/debug', protect, debugRoleCheck, createSurvey);
@@ -55,8 +62,8 @@ router.post('/surveys/debug', protect, debugRoleCheck, createSurvey);
 router.get('/:businessId/surveys', protect, flexibleRoleCheck, getBusinessSurveys);
 
 // POST yöntemiyle alternatif anket oluşturma - eski istemciler için destek
-router.post('/create-survey', protect, flexibleRoleCheck, createSurvey);
+router.post('/surveys', protect, flexibleRoleCheck, createSurvey);
 
 console.log('✅ Business survey routes başarıyla yüklendi');
 
-export default router; 
+export default router;

@@ -17,7 +17,7 @@ const auth_1 = require("../middleware/auth");
 const User_1 = __importDefault(require("../models/User"));
 const Survey_1 = __importDefault(require("../models/Survey"));
 const Business_1 = __importDefault(require("../models/Business"));
-const Response_1 = __importDefault(require("../models/Response"));
+const Response_1 = require("../models/Response");
 const router = express_1.default.Router();
 // Tüm admin dashboard istatistikleri
 router.get('/admin/dashboard', auth_1.protect, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -28,7 +28,7 @@ router.get('/admin/dashboard', auth_1.protect, (req, res) => __awaiter(void 0, v
         // Aktif anket sayısı
         const activeSurveys = yield Survey_1.default.countDocuments({ isActive: true });
         // Toplam yanıt sayısı
-        const totalResponses = yield Response_1.default.countDocuments();
+        const totalResponses = yield Response_1.Response.countDocuments();
         // Toplam kullanıcı sayısı
         const totalUsers = yield User_1.default.countDocuments();
         // Toplam işletme sayısı
@@ -59,7 +59,7 @@ router.get('/admin/stats', auth_1.protect, (req, res) => __awaiter(void 0, void 
         // Aktif anket sayısı
         const activeSurveys = yield Survey_1.default.countDocuments({ isActive: true });
         // Toplam yanıt sayısı
-        const totalResponses = yield Response_1.default.countDocuments();
+        const totalResponses = yield Response_1.Response.countDocuments();
         // Toplam kullanıcı sayısı
         const totalUsers = yield User_1.default.countDocuments();
         // Toplam işletme sayısı
@@ -98,7 +98,7 @@ router.get('/stats', auth_1.protect, (req, res) => __awaiter(void 0, void 0, voi
         // Aktif anket sayısı
         const activeSurveys = yield Survey_1.default.countDocuments(Object.assign(Object.assign({}, query), { isActive: true }));
         // Toplam yanıt sayısı
-        const totalResponses = yield Response_1.default.countDocuments(query);
+        const totalResponses = yield Response_1.Response.countDocuments(query);
         // Toplam işletme sayısı (admin için)
         const totalBusinesses = isAdmin ? yield Business_1.default.countDocuments() : 1;
         // Toplam kullanıcı sayısı (admin için)
@@ -139,7 +139,7 @@ router.get('/dashboard', auth_1.protect, (req, res) => __awaiter(void 0, void 0,
         // Aktif anket sayısı
         const activeSurveys = yield Survey_1.default.countDocuments(Object.assign(Object.assign({}, query), { isActive: true }));
         // Toplam yanıt sayısı
-        const totalResponses = yield Response_1.default.countDocuments(query);
+        const totalResponses = yield Response_1.Response.countDocuments(query);
         // Toplam işletme sayısı (admin için)
         const totalBusinesses = isAdmin ? yield Business_1.default.countDocuments() : 1;
         // Toplam kullanıcı sayısı (admin için)

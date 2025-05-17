@@ -43,6 +43,12 @@ const Navbar: React.FC = () => {
                                     <Button color="inherit" onClick={() => navigate('/business/surveys')}>
                                         Anketler
                                     </Button>
+                                    <Button color="inherit" onClick={() => navigate('/business/analytics')}>
+                                        Müşteri Analizi
+                                    </Button>
+                                    <Button color="inherit" onClick={() => navigate('/business/rewards')}>
+                                        Ödül Sistemi
+                                    </Button>
                                     <Button color="inherit" onClick={() => navigate('/business/profile')}>
                                         Profil
                                     </Button>

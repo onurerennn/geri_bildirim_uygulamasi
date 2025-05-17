@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User } from '../types/User';
 import { useNavigate } from 'react-router-dom';
+import apiService from '../services/api';
 
 interface AuthContextData {
     isAuthenticated: boolean;
@@ -10,6 +11,7 @@ interface AuthContextData {
     checkAndUpdateToken: () => void;
     getAuthHeader: () => { Authorization?: string };
     setUser: (user: User) => void;
+    updateProfile: () => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextData>({
@@ -19,7 +21,8 @@ const AuthContext = createContext<AuthContextData>({
     logout: () => { },
     checkAndUpdateToken: () => { },
     getAuthHeader: () => ({}),
-    setUser: () => { }
+    setUser: () => { },
+    updateProfile: async () => false
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -261,6 +264,67 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
     };
 
+    const updateProfile = async () => {
+        try {
+            // Mevcut token kontrolü
+            const token = localStorage.getItem('token');
+            if (!token) return false;
+
+            console.log("🔄 Kullanıcı profili güncelleniyor...");
+
+            // Profil bilgilerini API'den al
+            const response = await apiService.get('/users/profile');
+            console.log("API yanıtı:", response.data);
+
+            if (response.data && response.data.success && response.data.data && response.data.data.user) {
+                const userData = response.data.data.user;
+                console.log("Alınan kullanıcı verileri:", userData);
+
+                // Mevcut localStorage verisini al
+                const currentUserStr = localStorage.getItem('user');
+                let currentUser = null;
+
+                if (currentUserStr) {
+                    try {
+                        currentUser = JSON.parse(currentUserStr);
+                    } catch (e) {
+                        console.error('Mevcut kullanıcı verisi parse edilemedi:', e);
+                    }
+                }
+
+                // Kullanıcı nesnesini güncelle, points alanını özellikle belirt
+                const updatedUser = {
+                    ...(currentUser || {}), // Mevcut verileri koru
+                    ...userData,
+                    // Puanları belirgin şekilde güncelle
+                    points: userData.points || userData.totalApprovedPoints || 0,
+                    // Oturum kontrolü için gerekli alanları koru
+                    isActive: userData.isActive !== false,
+                    role: userData.role || 'CUSTOMER'
+                };
+
+                // Puanları kontrol et ve logla
+                if (userData.points !== undefined || userData.totalApprovedPoints !== undefined) {
+                    console.log("Kullanıcı puanları güncellendi:", updatedUser.points);
+                }
+
+                setUser(updatedUser);
+
+                // LocalStorage'ı güncelle
+                localStorage.setItem('user', JSON.stringify(updatedUser));
+
+                console.log("✅ Kullanıcı profili güncellendi:", updatedUser.name);
+                return true;
+            }
+
+            console.warn("Profil verileri alınamadı veya eksik veri");
+            return false;
+        } catch (error) {
+            console.error("❌ Profil güncelleme hatası:", error);
+            return false;
+        }
+    };
+
     // İlk yükleme tamamlanana kadar bir yükleme ekranı gösterebiliriz
     if (!isInitialized) {
         return <div>Yükleniyor...</div>;
@@ -274,7 +338,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             logout,
             checkAndUpdateToken,
             getAuthHeader,
-            setUser: updateUser
+            setUser: updateUser,
+            updateProfile
         }}>
             {children}
         </AuthContext.Provider>

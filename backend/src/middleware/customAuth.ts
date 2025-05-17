@@ -136,9 +136,13 @@ export const flexibleRoleCheck = (req: Request, res: Response, next: NextFunctio
         return next();
     }
 
-    // Eğer kullanıcı zaten mevcut ve admin rolündeyse, devam et
-    if (req.user && (req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.BUSINESS_ADMIN)) {
-        console.log('✅ Kullanıcı yönetici rolüne sahip, izin veriliyor');
+    // Eğer kullanıcı zaten mevcut ve admin rolündeyse veya CUSTOMER ise, devam et
+    if (req.user && (
+        req.user.role === UserRole.SUPER_ADMIN ||
+        req.user.role === UserRole.BUSINESS_ADMIN ||
+        req.user.role === UserRole.CUSTOMER
+    )) {
+        console.log('✅ Kullanıcı geçerli role sahip, izin veriliyor');
         return next();
     }
 

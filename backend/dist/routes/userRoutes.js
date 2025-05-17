@@ -11,6 +11,11 @@ const UserRole_1 = require("../types/UserRole");
 const router = express_1.default.Router();
 // Tüm rotalar için authentication gerekli
 router.use(auth_1.protect);
+// Profil rotaları - tüm kullanıcılar için erişilebilir
+router.get('/profile', userController_1.getUserProfile);
+// Müşteri ve puan yönetimi - işletme yöneticileri ve süper admin için
+router.get('/business/:businessId/customers', (0, roleAuth_1.checkRole)([UserRole_1.UserRole.BUSINESS_ADMIN, UserRole_1.UserRole.SUPER_ADMIN]), userController_1.getBusinessCustomers);
+router.patch('/:userId/reward-points', (0, roleAuth_1.checkRole)([UserRole_1.UserRole.BUSINESS_ADMIN, UserRole_1.UserRole.SUPER_ADMIN]), userController_1.updateRewardPoints);
 // Admin ve Super Admin rotaları
 router.get('/', (0, roleAuth_1.checkRole)([UserRole_1.UserRole.SUPER_ADMIN]), userController_1.getUsers);
 router.get('/:id', (0, roleAuth_1.checkRole)([UserRole_1.UserRole.SUPER_ADMIN, UserRole_1.UserRole.BUSINESS_ADMIN]), userController_1.getUser);

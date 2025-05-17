@@ -33,59 +33,28 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.Response = void 0;
+exports.Log = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
-const ResponseSchema = new mongoose_1.Schema({
-    survey: {
+const LogSchema = new mongoose_1.Schema({
+    action: {
+        type: String,
+        required: true,
+        enum: ['APPROVE_POINTS', 'REJECT_POINTS', 'UPDATE_POINTS', 'DELETE_RESPONSE', 'CREATE_USER', 'LOGIN', 'LOGOUT']
+    },
+    user: {
         type: mongoose_1.Schema.Types.ObjectId,
-        ref: 'Survey',
+        ref: 'User',
         required: true
     },
-    business: {
-        type: mongoose_1.Schema.Types.ObjectId,
-        ref: 'Business',
-        required: true
-    },
-    customer: {
-        type: mongoose_1.Schema.Types.Mixed, // String (ObjectId) veya nesne olabilir
-        ref: 'User'
-    },
-    userId: {
-        type: mongoose_1.Schema.Types.ObjectId,
-        ref: 'User'
-    },
-    customerName: String,
-    customerEmail: String,
-    answers: [{
-            question: {
-                type: mongoose_1.Schema.Types.Mixed, // String (ObjectId) veya düz metin olabilir
-                required: true
-            },
-            value: {
-                type: mongoose_1.Schema.Types.Mixed,
-                required: true
-            }
-        }],
-    rewardPoints: {
-        type: Number,
-        default: 0
-    },
-    pointsApproved: {
-        type: Boolean,
-        default: null
-    },
-    approvedBy: {
-        type: mongoose_1.Schema.Types.ObjectId,
-        ref: 'User'
-    },
-    approvedAt: Date,
-    rejectedBy: {
-        type: mongoose_1.Schema.Types.ObjectId,
-        ref: 'User'
-    },
-    rejectedAt: Date
+    details: {
+        type: mongoose_1.Schema.Types.Mixed,
+        default: {}
+    }
 }, {
     timestamps: true
 });
-exports.Response = mongoose_1.default.model('Response', ResponseSchema);
-exports.default = exports.Response;
+// Performans için indeks ekleme
+LogSchema.index({ action: 1, createdAt: -1 });
+LogSchema.index({ user: 1, createdAt: -1 });
+exports.Log = mongoose_1.default.model('Log', LogSchema);
+exports.default = exports.Log;

@@ -57,7 +57,54 @@ const QRCodes: React.FC = () => {
                 }
 
                 const response = await api.get(`/surveys/qr/business/${user.business}`);
-                setQrCodes(response.data);
+                console.log('Business QR codes response:', response.data);
+
+                // Handle different response formats
+                let qrCodesData: QRCodeData[] = [];
+
+                // New format: {success: true, data: [...]}
+                if (response.data && typeof response.data === 'object' && response.data.hasOwnProperty('success')) {
+                    if (response.data.success && Array.isArray(response.data.data)) {
+                        // Process data array based on format
+                        const data = response.data.data;
+
+                        // Format 1: Array of survey objects with qrCodes arrays
+                        if (data.length > 0 && data[0].survey && Array.isArray(data[0].qrCodes)) {
+                            data.forEach(item => {
+                                if (item.qrCodes && Array.isArray(item.qrCodes)) {
+                                    const surveyTitle = item.survey?.title || 'Adsız Anket';
+                                    const qrCodesWithTitle = item.qrCodes.map(qr => ({
+                                        ...qr,
+                                        surveyTitle,
+                                        survey: item.survey
+                                    }));
+                                    qrCodesData.push(...qrCodesWithTitle);
+                                }
+                            });
+                        }
+                        // Format 2: Direct array of QR code objects
+                        else {
+                            qrCodesData = data;
+                        }
+                    }
+                }
+                // Legacy format: array of { survey: {...}, qrCodes: [...] }
+                else if (Array.isArray(response.data)) {
+                    response.data.forEach(item => {
+                        if (item.qrCodes && Array.isArray(item.qrCodes)) {
+                            const surveyTitle = item.survey?.title || 'Adsız Anket';
+                            const qrCodesWithTitle = item.qrCodes.map(qr => ({
+                                ...qr,
+                                surveyTitle,
+                                survey: item.survey
+                            }));
+                            qrCodesData.push(...qrCodesWithTitle);
+                        }
+                    });
+                }
+
+                console.log(`Processed ${qrCodesData.length} QR codes from all surveys`);
+                setQrCodes(qrCodesData);
                 setLoading(false);
             } catch (err: any) {
                 console.error('QR kodları yüklenirken hata oluştu:', err);
@@ -223,6 +270,13 @@ const QRCodes: React.FC = () => {
         setConfirmOpen(true);
     };
 
+    // Ensure qrCodes is always an array
+    const ensureQrCodesArray = (): QRCodeData[] => {
+        if (!qrCodes) return [];
+        if (!Array.isArray(qrCodes)) return [qrCodes as any];
+        return qrCodes;
+    };
+
     const handleDelete = async () => {
         if (!deleteId) return;
 
@@ -231,7 +285,7 @@ const QRCodes: React.FC = () => {
             await api.delete(`/surveys/qr/${deleteId}`);
 
             // Silinen QR kodu listeden çıkar
-            setQrCodes(qrCodes.filter(qr => qr._id !== deleteId));
+            setQrCodes(ensureQrCodesArray().filter(qr => qr._id !== deleteId));
             setConfirmOpen(false);
             setDeleteId(null);
             setLoading(false);
@@ -268,13 +322,13 @@ const QRCodes: React.FC = () => {
                 <Typography variant="h4" component="h1" gutterBottom>
                     QR Kodlar
                 </Typography>
-                {qrCodes.length === 0 ? (
+                {ensureQrCodesArray().length === 0 ? (
                     <Alert severity="info">
                         Henüz hiç QR kodunuz bulunmamaktadır. Anket oluşturduğunuzda otomatik olarak QR kodları oluşturulacaktır.
                     </Alert>
                 ) : (
                     <Stack direction="row" flexWrap="wrap" gap={2}>
-                        {qrCodes.map((qr) => (
+                        {ensureQrCodesArray().map((qr) => (
                             <Box key={qr._id} sx={{ width: { xs: '100%', sm: '45%', md: '30%' } }}>
                                 <Card elevation={3}>
                                     <CardContent>

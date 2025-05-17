@@ -146,4 +146,155 @@ api.interceptors.response.use(
     }
 );
 
-export default api; 
+// API hatasını işle
+const handleApiError = (error: any) => {
+    console.error("API Hatası:", error);
+    if (error.response && error.response.status === 401) {
+        // Yetkilendirme hatası
+        safeRemoveItem('token');
+        safeRemoveItem('user');
+        window.location.href = '/login';
+    }
+};
+
+// Onaylanmamış puan yanıtlarını getir
+const getPendingApprovals = async () => {
+    try {
+        const response = await axios.get('/api/surveys/business/pending-approvals');
+        return response.data;
+    } catch (error) {
+        handleApiError(error);
+        throw error;
+    }
+};
+
+// Yanıt puanlarını onayla
+const approveResponsePoints = async (responseId: string, approvedPoints: number) => {
+    try {
+        const response = await axios.patch(`/api/surveys/responses/${responseId}/approve-points`, {
+            approvedPoints
+        });
+        return response.data;
+    } catch (error) {
+        handleApiError(error);
+        throw error;
+    }
+};
+
+// HTTP istekleri için yardımcı fonksiyonlar
+const get = async (url: string, config?: any) => {
+    try {
+        const response = await api.get(url, config);
+        return response;
+    } catch (error) {
+        handleApiError(error);
+        throw error;
+    }
+};
+
+const post = async (url: string, data?: any, config?: any) => {
+    try {
+        // Verilerin JSON formatında gönderildiğinden ve headers'ın doğru olduğundan emin ol
+        const fullConfig = {
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            ...config
+        };
+
+        console.log(`API POST: ${url}`);
+        console.log('POST Verileri:', JSON.stringify(data, null, 2));
+
+        const response = await api.post(url, data, fullConfig);
+        return response;
+    } catch (error) {
+        handleApiError(error);
+        throw error;
+    }
+};
+
+const put = async (url: string, data?: any, config?: any) => {
+    try {
+        const response = await api.put(url, data, config);
+        return response;
+    } catch (error) {
+        handleApiError(error);
+        throw error;
+    }
+};
+
+const del = async (url: string, config?: any) => {
+    try {
+        const response = await api.delete(url, config);
+        return response;
+    } catch (error) {
+        handleApiError(error);
+        throw error;
+    }
+};
+
+const patch = async (url: string, data?: any, config?: any) => {
+    try {
+        console.log(`🔧 API PATCH isteği başlatılıyor: ${url}`);
+        console.log('PATCH Verileri:', JSON.stringify(data, null, 2));
+
+        // Verilerin JSON formatında gönderildiğinden ve headers'ın doğru olduğundan emin ol
+        const fullConfig = {
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            ...config
+        };
+
+        try {
+            const response = await api.patch(url, data, fullConfig);
+            console.log(`✅ PATCH isteği başarılı: ${url}`, response.data);
+            return response;
+        } catch (apiError: any) {
+            console.error(`❌ PATCH isteği başarısız: ${url}`);
+            console.error('PATCH hata detayları:', {
+                status: apiError.response?.status,
+                statusText: apiError.response?.statusText,
+                data: apiError.response?.data,
+                message: apiError.message
+            });
+
+            // 500 sunucu hatası durumunda daha fazla ayrıntı
+            if (apiError.response?.status === 500) {
+                console.error('Sunucu hatası detayları:', {
+                    url: apiError.config?.url,
+                    baseURL: apiError.config?.baseURL,
+                    method: apiError.config?.method,
+                    headers: apiError.config?.headers,
+                    data: apiError.config?.data,
+                    responseType: apiError.response?.headers?.['content-type'],
+                    responseSize: apiError.response?.data ?
+                        (typeof apiError.response.data === 'string' ?
+                            apiError.response.data.length :
+                            JSON.stringify(apiError.response.data).length) : 0
+                });
+            }
+
+            handleApiError(apiError);
+            throw apiError;
+        }
+    } catch (error: any) {
+        console.error('❌ PATCH genel hata:', error.message);
+        handleApiError(error);
+        throw error;
+    }
+};
+
+// Combine the original api object with the new functions
+const apiService = {
+    ...api,
+    get,
+    post,
+    put,
+    delete: del,
+    patch,
+    getPendingApprovals,
+    approveResponsePoints
+};
+
+export default apiService; 

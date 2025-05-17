@@ -11,15 +11,65 @@ import {
     Divider,
     Grid,
     CircularProgress,
-    Alert
+    Alert,
+    List,
+    ListItem,
+    ListItemText,
+    Card,
+    CardContent,
+    Chip,
+    Badge
 } from '@mui/material';
-import { Person as PersonIcon, Business as BusinessIcon } from '@mui/icons-material';
+import {
+    Person as PersonIcon,
+    Business as BusinessIcon,
+    EmojiEvents as RewardIcon,
+    Poll as SurveyIcon,
+    Done as DoneIcon
+} from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { UserRole } from '../types/UserRole';
+import api from '../services/api';
+import moment from 'moment';
+
+// Profil veri tipi
+interface ProfileData {
+    user: {
+        _id: string;
+        name: string;
+        email: string;
+        role: string;
+        points: number;
+        completedSurveys: SurveyInfo[];
+    };
+    responses: ResponseInfo[];
+}
+
+// Anket bilgi tipi
+interface SurveyInfo {
+    _id: string;
+    title: string;
+    description: string;
+    rewardPoints: number;
+    createdAt: string;
+}
+
+// Yanıt bilgi tipi
+interface ResponseInfo {
+    _id: string;
+    survey: {
+        _id: string;
+        title: string;
+        description: string;
+    };
+    rewardPoints: number;
+    createdAt: string;
+}
 
 const Profile: React.FC = () => {
     const { user } = useAuth();
     const [loading, setLoading] = useState(false);
+    const [profileData, setProfileData] = useState<ProfileData | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
 
@@ -43,8 +93,11 @@ const Profile: React.FC = () => {
     });
 
     useEffect(() => {
-        // Kullanıcı verilerini form'a yükle
+        // Kullanıcı profil bilgilerini yükle
         if (user) {
+            fetchProfileData();
+
+            // Form değerlerini doldur
             setFormData(prev => ({
                 ...prev,
                 name: user.name || '',
@@ -58,6 +111,25 @@ const Profile: React.FC = () => {
             }
         }
     }, [user]);
+
+    const fetchProfileData = async () => {
+        setLoading(true);
+        try {
+            const response = await api.get('/users/profile');
+
+            if (response.data && response.data.success) {
+                setProfileData(response.data.data);
+                console.log('Profil verileri yüklendi:', response.data.data);
+            } else {
+                setError('Profil verileri alınamadı');
+            }
+        } catch (err: any) {
+            console.error('Profil verisi alma hatası:', err);
+            setError(err.message || 'Profil verileri yüklenirken bir hata oluştu');
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const fetchBusinessData = async (businessId: string) => {
         setLoading(true);
@@ -229,6 +301,15 @@ const Profile: React.FC = () => {
                                         ? 'İşletme Yöneticisi'
                                         : 'Müşteri'}
                             </Typography>
+
+                            {profileData?.user?.points !== undefined && (
+                                <Chip
+                                    icon={<RewardIcon />}
+                                    label={`${profileData.user.points} Puan`}
+                                    color="primary"
+                                    sx={{ mt: 2 }}
+                                />
+                            )}
                         </Grid>
                         <Grid item xs={12} md={8}>
                             <Typography variant="h6" gutterBottom>
@@ -273,6 +354,58 @@ const Profile: React.FC = () => {
                         </Grid>
                     </Grid>
                 </Paper>
+
+                {/* Puanlar ve Katılınan Anketler - sadece CUSTOMER için göster */}
+                {user.role === UserRole.CUSTOMER && (
+                    <Paper sx={{ p: 3 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+                            <SurveyIcon sx={{ mr: 1 }} />
+                            <Typography variant="h6">
+                                Anket Geçmişi ve Kazanılan Puanlar
+                            </Typography>
+                        </Box>
+
+                        {loading ? (
+                            <Box display="flex" justifyContent="center" my={3}>
+                                <CircularProgress />
+                            </Box>
+                        ) : profileData?.responses && profileData.responses.length > 0 ? (
+                            <Grid container spacing={2}>
+                                {profileData.responses.map((response) => (
+                                    <Grid item xs={12} sm={6} md={4} key={response._id}>
+                                        <Card sx={{ height: '100%' }}>
+                                            <CardContent>
+                                                <Typography variant="h6" gutterBottom>
+                                                    {response.survey.title}
+                                                </Typography>
+                                                <Typography variant="body2" color="text.secondary" gutterBottom>
+                                                    {response.survey.description?.length > 100
+                                                        ? `${response.survey.description.substring(0, 100)}...`
+                                                        : response.survey.description}
+                                                </Typography>
+                                                <Box display="flex" justifyContent="space-between" alignItems="center" mt={2}>
+                                                    <Chip
+                                                        icon={<RewardIcon />}
+                                                        label={`${response.rewardPoints || 0} Puan`}
+                                                        color="success"
+                                                        size="small"
+                                                    />
+                                                    <Typography variant="caption" color="text.secondary">
+                                                        {moment(response.createdAt).format('DD.MM.YYYY')}
+                                                    </Typography>
+                                                </Box>
+                                            </CardContent>
+                                        </Card>
+                                    </Grid>
+                                ))}
+                            </Grid>
+                        ) : (
+                            <Alert severity="info">
+                                Henüz hiç ankete katılmadınız. Ankete katılarak puanlar kazanabilirsiniz.
+                            </Alert>
+                        )}
+                    </Paper>
+                )}
 
                 {/* İşletme profili - sadece BUSINESS_ADMIN için göster */}
                 {user.role === UserRole.BUSINESS_ADMIN && (

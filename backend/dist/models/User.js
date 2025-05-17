@@ -82,7 +82,15 @@ const userSchema = new mongoose_1.default.Schema({
     business: {
         type: mongoose_1.default.Schema.Types.ObjectId,
         ref: 'Business'
-    }
+    },
+    points: {
+        type: Number,
+        default: 0
+    },
+    completedSurveys: [{
+            type: mongoose_1.default.Schema.Types.ObjectId,
+            ref: 'Survey'
+        }]
 }, {
     timestamps: true
 });

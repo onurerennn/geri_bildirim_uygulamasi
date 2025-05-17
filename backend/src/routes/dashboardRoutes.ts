@@ -3,7 +3,7 @@ import { protect } from '../middleware/auth';
 import User from '../models/User';
 import Survey from '../models/Survey';
 import Business from '../models/Business';
-import Response from '../models/Response';
+import { Response } from '../models/Response';
 
 const router = express.Router();
 

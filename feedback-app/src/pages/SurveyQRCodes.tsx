@@ -100,13 +100,20 @@ const SurveyQRCodes: React.FC = () => {
                 setSurvey(surveyResponse.data);
 
                 // QR kodlarını getir
-                const qrResponse = await api.get(`/surveys/qr/survey/${surveyId}`);
-                setQrCodes(qrResponse.data);
+                try {
+                    // Servisi kullanarak QR kodları getir
+                    const qrCodes = await surveyService.getSurveyQRCodes(surveyId || '');
+                    console.log(`✅ ${qrCodes.length} adet QR kod alındı:`, qrCodes);
+                    setQrCodes(qrCodes);
+                } catch (qrError: any) {
+                    console.error('❌ QR kodları alınırken hata:', qrError);
+                    setQrCodes([]);
+                }
 
                 setLoading(false);
             } catch (err: any) {
-                console.error('QR kodları yüklenirken hata oluştu:', err);
-                setError('QR kodları yüklenirken bir hata oluştu');
+                console.error('❌ Veri yüklenirken hata oluştu:', err);
+                setError('Veri yüklenirken bir hata oluştu');
                 setLoading(false);
             }
         };
@@ -147,7 +154,7 @@ const SurveyQRCodes: React.FC = () => {
         }
 
         // Generate QR code image URLs
-        const qrCodeImages = qrCodes.map((qr, i) => {
+        const qrCodeImages = ensureQrCodesArray().map((qr, i) => {
             const element = document.getElementById(`qr-code-${qr._id}`);
             const svgElement = element instanceof SVGSVGElement ? element : null;
             return svgElement ? svgToDataURL(svgElement) : '';
@@ -179,7 +186,7 @@ const SurveyQRCodes: React.FC = () => {
                         <p>${survey?.description || ''}</p>
                     </div>
                     <div class="qr-grid">
-                        ${qrCodes.map((qr, i) => `
+                        ${ensureQrCodesArray().map((qr, i) => `
                             <div class="qr-item">
                                 <div class="qr-code">
                                     <img src="${qrCodeImages[i]}" width="200" height="200" />
@@ -252,7 +259,7 @@ const SurveyQRCodes: React.FC = () => {
             await api.delete(`/surveys/qr/${deleteId}`);
 
             // Silinen QR kodu listeden çıkar
-            setQrCodes(qrCodes.filter(qr => qr._id !== deleteId));
+            setQrCodes(ensureQrCodesArray().filter(qr => qr._id !== deleteId));
             setConfirmOpen(false);
             setDeleteId(null);
             setLoading(false);
@@ -264,6 +271,13 @@ const SurveyQRCodes: React.FC = () => {
             setLoading(false);
             showSnackbar('QR kod silinirken bir hata oluştu', 'error');
         }
+    };
+
+    // Always ensure qrCodes is an array
+    const ensureQrCodesArray = (): QRCode[] => {
+        if (!qrCodes) return [];
+        if (!Array.isArray(qrCodes)) return [qrCodes as any];
+        return qrCodes;
     };
 
     if (loading) {
@@ -318,7 +332,7 @@ const SurveyQRCodes: React.FC = () => {
                 </Typography>
             </Box>
 
-            {qrCodes.length === 0 ? (
+            {ensureQrCodesArray().length === 0 ? (
                 <Alert severity="info">
                     Bu anket için QR kodu bulunamadı. Yeni bir QR kodu oluşturun.
                 </Alert>
@@ -335,7 +349,7 @@ const SurveyQRCodes: React.FC = () => {
                     </Box>
 
                     <Grid container spacing={3}>
-                        {qrCodes.map((qrCode, index) => (
+                        {ensureQrCodesArray().map((qrCode, index) => (
                             <Grid item xs={12} sm={6} md={6} key={qrCode._id}>
                                 <StyledPaper elevation={3}>
                                     <Typography variant="h6" gutterBottom>
