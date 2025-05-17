@@ -7,7 +7,8 @@ import {
     deleteUser,
     getUserProfile,
     getBusinessCustomers,
-    updateRewardPoints
+    updateRewardPoints,
+    useRewardPoints
 } from '../controllers/userController';
 import { protect } from '../middleware/auth';
 import { checkRole } from '../middleware/roleAuth';
@@ -24,6 +25,7 @@ router.get('/profile', getUserProfile);
 // Müşteri ve puan yönetimi - işletme yöneticileri ve süper admin için
 router.get('/business/:businessId/customers', checkRole([UserRole.BUSINESS_ADMIN, UserRole.SUPER_ADMIN]), getBusinessCustomers);
 router.patch('/:userId/reward-points', checkRole([UserRole.BUSINESS_ADMIN, UserRole.SUPER_ADMIN]), updateRewardPoints);
+router.post('/use-points', checkRole([UserRole.BUSINESS_ADMIN, UserRole.SUPER_ADMIN]), useRewardPoints);
 
 // Admin ve Super Admin rotaları
 router.get('/', checkRole([UserRole.SUPER_ADMIN]), getUsers);

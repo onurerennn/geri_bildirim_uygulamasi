@@ -8,8 +8,10 @@ import ResponseModel from '../models/Response';
 import mongoose from 'mongoose';
 
 // Token oluşturma fonksiyonu
-const generateToken = (id: string): string => {
-    return jwt.sign({ id }, process.env.JWT_SECRET || 'gizlianahtar', {
+const generateToken = (id: string | mongoose.Types.ObjectId): string => {
+    // ObjectId türünde ise string'e dönüştür
+    const idStr = typeof id === 'string' ? id : id.toString();
+    return jwt.sign({ id: idStr }, process.env.JWT_SECRET || 'default_secret', {
         expiresIn: '30d',
     });
 };
@@ -180,7 +182,7 @@ export const login = async (req: Request, res: Response) => {
                     console.log('Şifre doğrulandı, token oluşturuluyor');
                     // Token oluştur
                     const token = jwt.sign(
-                        { id: user._id },
+                        { id: user._id.toString() },
                         process.env.JWT_SECRET || 'default_secret',
                         { expiresIn: '30d' }
                     );
@@ -283,7 +285,7 @@ export const login = async (req: Request, res: Response) => {
                         console.log('İşletme admin hesabı bulundu, token oluşturuluyor');
                         // Token oluştur (admin için)
                         const token = jwt.sign(
-                            { id: businessAdmin._id },
+                            { id: businessAdmin._id.toString() },
                             process.env.JWT_SECRET || 'default_secret',
                             { expiresIn: '30d' }
                         );
@@ -336,7 +338,7 @@ export const login = async (req: Request, res: Response) => {
 
                         // Token oluştur (yeni admin için)
                         const token = jwt.sign(
-                            { id: newBusinessAdmin._id },
+                            { id: newBusinessAdmin._id.toString() },
                             process.env.JWT_SECRET || 'default_secret',
                             { expiresIn: '30d' }
                         );

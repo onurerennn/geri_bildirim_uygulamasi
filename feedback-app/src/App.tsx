@@ -40,14 +40,54 @@ const ProtectedRoute = ({
   const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [originalRole, setOriginalRole] = useState<UserRole | null>(null);
 
+  // İlk yüklemede kullanıcı rolünü kaydet
   useEffect(() => {
-    // Check if user needs business configuration and is trying to access business routes
-    if (user?.needsBusinessConfig && location.pathname.includes('/business/')) {
-      console.log('Kullanıcı işletme ayarlarına ihtiyaç duyuyor, DevTools sayfasına yönlendiriliyor');
-      navigate('/dev-tools');
+    if (user && user.role && !originalRole) {
+      console.log('Orijinal kullanıcı rolü kaydedildi:', user.role);
+      setOriginalRole(user.role as UserRole);
     }
-  }, [user, location.pathname, navigate]);
+  }, [user, originalRole]);
+
+  // Otomatik sayfa yönlendirmelerini önlemek için - puan güncellemelerinde
+  useEffect(() => {
+    // Eğer hem kaydedilmiş rol hem kullanıcı bilgisi varsa
+    if (originalRole && user && user.role) {
+      // Eğer rol değişimi varsa ve bu business-customer arasında bir geçiş ise
+      if (originalRole !== user.role) {
+        console.log('⚠️ Rol farklılığı tespit edildi!', {
+          originalRole,
+          currentRole: user.role
+        });
+
+        // Business Admin sayfasındayken müşteri sayfasına otomatik yönlendirmeleri engelle
+        if (
+          location.pathname.includes('/business') &&
+          originalRole === UserRole.BUSINESS_ADMIN &&
+          user.role === UserRole.CUSTOMER
+        ) {
+          console.log('🛑 Business sayfasından müşteri sayfasına otomatik yönlendirme engellendi!');
+
+          // Güvenlik için localStorage'daki role bilgisini orijinal haline geri çevir
+          try {
+            const userStr = localStorage.getItem('user');
+            if (userStr) {
+              const userData = JSON.parse(userStr);
+              userData.role = originalRole;
+              localStorage.setItem('user', JSON.stringify(userData));
+              console.log('🔄 localStorage kullanıcı rolü orijinal değere geri çevrildi');
+            }
+          } catch (error) {
+            console.error('localStorage güncelleme hatası:', error);
+          }
+
+          // Sayfayı yenile - yönlendirme olmadan
+          window.location.reload();
+        }
+      }
+    }
+  }, [user?.role, originalRole, location.pathname]);
 
   if (!isAuthenticated) {
     // Oturum açılmamışsa login sayfasına yönlendir
@@ -58,15 +98,6 @@ const ProtectedRoute = ({
   if (allowedRoles && (!user || !allowedRoles.includes(user.role))) {
     // Kullanıcının rolü yetkili değilse ana sayfaya yönlendir
     return <Navigate to="/" replace />;
-  }
-
-  // Business Admin trying to access business pages without a business ID
-  if (user?.role === UserRole.BUSINESS_ADMIN &&
-    !user.business &&
-    location.pathname.includes('/business/') &&
-    !location.pathname.includes('/dev-tools')) {
-    console.log('BUSINESS_ADMIN without business ID trying to access business routes');
-    return <Navigate to="/dev-tools" replace />;
   }
 
   return <>{children}</>;
@@ -121,15 +152,6 @@ const AppRoutes = () => {
   // Sayfa değişikliklerini sadece log amaçlı takip et
   useEffect(() => {
     console.log('Sayfa değişti:', location.pathname);
-
-    // Check if a BUSINESS_ADMIN is navigating to a business page without a business ID
-    if (user?.role === UserRole.BUSINESS_ADMIN &&
-      !user.business &&
-      location.pathname.includes('/business/') &&
-      !location.pathname.includes('/dev-tools')) {
-      console.log('Redirecting to DevTools for business setup');
-      // We don't need to navigate here as the ProtectedRoute component will handle it
-    }
   }, [location.pathname, user]);
 
   // Oturum açma durumunu takip et ve sonsuz döngüleri önle

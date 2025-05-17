@@ -41,6 +41,7 @@ interface ProfileData {
         role: string;
         points: number;
         completedSurveys: SurveyInfo[];
+        pointTransactions: PointTransaction[];
     };
     responses: ResponseInfo[];
 }
@@ -64,6 +65,13 @@ interface ResponseInfo {
     };
     rewardPoints: number;
     createdAt: string;
+}
+
+// Puan işlem bilgi tipi
+interface PointTransaction {
+    amount: number;
+    description: string;
+    date: string;
 }
 
 const Profile: React.FC = () => {
@@ -120,6 +128,30 @@ const Profile: React.FC = () => {
             if (response.data && response.data.success) {
                 setProfileData(response.data.data);
                 console.log('Profil verileri yüklendi:', response.data.data);
+
+                // İşletme admin tarafından yapılan puan güncellemelerini göstermek için
+                // kullanıcı puanlarını doğrudan API'den gelen değere göre ayarla
+                const userPoints = response.data.data.user.points || 0;
+                console.log('👤 Güncel müşteri puanları:', userPoints);
+
+                // Profil verilerini güncelle
+                setProfileData(prevData => {
+                    if (!prevData) return response.data.data;
+                    return {
+                        ...prevData,
+                        user: {
+                            ...prevData.user,
+                            points: userPoints
+                        }
+                    };
+                });
+
+                // Puan işlemlerini detaylı göster
+                if (response.data.data.user.pointTransactions &&
+                    response.data.data.user.pointTransactions.length > 0) {
+                    console.log('👤 Son puan işlemleri:',
+                        response.data.data.user.pointTransactions.slice(0, 5));
+                }
             } else {
                 setError('Profil verileri alınamadı');
             }
@@ -364,6 +396,91 @@ const Profile: React.FC = () => {
                                 Anket Geçmişi ve Kazanılan Puanlar
                             </Typography>
                         </Box>
+
+                        {/* Güncel toplam puan bilgisi */}
+                        <Box
+                            sx={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                mb: 3,
+                                p: 2,
+                                backgroundColor: 'primary.light',
+                                borderRadius: 1
+                            }}
+                        >
+                            <RewardIcon sx={{ fontSize: 36, color: 'white', mr: 2 }} />
+                            <Box>
+                                <Typography variant="subtitle2" color="white">
+                                    Toplam Puanınız
+                                </Typography>
+                                <Typography variant="h4" fontWeight="bold" color="white">
+                                    {profileData?.user?.points || 0}
+                                </Typography>
+                                <Typography variant="caption" color="white">
+                                    Son güncelleme: {new Date().toLocaleTimeString()}
+                                </Typography>
+                            </Box>
+                            <Box ml="auto">
+                                <Button
+                                    variant="contained"
+                                    color="primary"
+                                    onClick={fetchProfileData}
+                                    disabled={loading}
+                                    startIcon={loading ? <CircularProgress size={20} /> : <span role="img" aria-label="refresh">🔄</span>}
+                                    size="small"
+                                    sx={{ bgcolor: 'white', color: 'primary.main' }}
+                                >
+                                    Puanları Güncelle
+                                </Button>
+                            </Box>
+                        </Box>
+
+                        {/* Puan işlem geçmişi bölümü */}
+                        {profileData?.user?.pointTransactions && profileData.user.pointTransactions.length > 0 && (
+                            <Box sx={{ mb: 3 }}>
+                                <Typography variant="h6" gutterBottom>
+                                    Puan İşlem Geçmişi
+                                </Typography>
+                                <Paper variant="outlined" sx={{ maxHeight: 300, overflow: 'auto' }}>
+                                    <List dense>
+                                        {profileData.user.pointTransactions.map((transaction: any, index: number) => (
+                                            <ListItem
+                                                key={index}
+                                                divider={index < profileData.user.pointTransactions.length - 1}
+                                                sx={{
+                                                    bgcolor: transaction.amount < 0 ? 'rgba(239, 83, 80, 0.05)' : 'rgba(76, 175, 80, 0.05)'
+                                                }}
+                                            >
+                                                <ListItemText
+                                                    primary={
+                                                        <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                                                            <Typography variant="body2" fontWeight="bold">
+                                                                {transaction.amount < 0 ? 'Puan Kullanımı' : 'Puan Kazanımı'}
+                                                            </Typography>
+                                                            <Chip
+                                                                size="small"
+                                                                label={`${transaction.amount > 0 ? '+' : ''}${transaction.amount} puan`}
+                                                                color={transaction.amount < 0 ? 'error' : 'success'}
+                                                            />
+                                                        </Box>
+                                                    }
+                                                    secondary={
+                                                        <>
+                                                            <Typography variant="caption" display="block">
+                                                                {transaction.description || 'İşlem'}
+                                                            </Typography>
+                                                            <Typography variant="caption" color="text.secondary">
+                                                                {new Date(transaction.date).toLocaleString()}
+                                                            </Typography>
+                                                        </>
+                                                    }
+                                                />
+                                            </ListItem>
+                                        ))}
+                                    </List>
+                                </Paper>
+                            </Box>
+                        )}
 
                         {loading ? (
                             <Box display="flex" justifyContent="center" my={3}>
