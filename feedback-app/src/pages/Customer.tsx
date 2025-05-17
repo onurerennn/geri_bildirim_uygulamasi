@@ -103,6 +103,8 @@ interface ResponseInfo {
     rewardPoints: number;
     pointsApproved: boolean; // Onay durumu
     createdAt: string;
+    updatedRewardPoints?: number; // Güncellenen ödül puanları
+    lastPointsUpdate?: string; // Son puan güncelleme tarihi
 }
 
 const Customer = () => {
@@ -122,6 +124,7 @@ const Customer = () => {
     const [tabValue, setTabValue] = useState(1);
     const [qrCodeInput, setQrCodeInput] = useState('');
     const [scanLoading, setScanLoading] = useState(false);
+    const [displayPoints, setDisplayPoints] = useState(0);
     const [selectedSurvey, setSelectedSurvey] = useState<null | {
         title: string;
         description: string;
@@ -139,7 +142,7 @@ const Customer = () => {
         console.log('Customer component mounted');
         fetchSurveys();
         fetchUserProfile();
-    }, []);
+    }, [user]);
 
     // Debug için profil verilerinin durumunu logla
     useEffect(() => {
@@ -156,6 +159,14 @@ const Customer = () => {
             });
         }
     }, [profileData]);
+
+    // Tab değiştiğinde profil verilerini güncelle (özellikle 0 tabı - profil sayfası açıldığında)
+    useEffect(() => {
+        if (tabValue === 0) {
+            console.log('👤 Profil tabı seçildi, veriler yenileniyor...');
+            fetchUserProfile();
+        }
+    }, [tabValue]);
 
     // Yanıt gönderdikten sonra profil bilgilerini güncelle
     const updateProfileAfterAction = () => {
@@ -186,8 +197,53 @@ const Customer = () => {
                     rewardPoints: userData.rewardPoints
                 });
 
-                // Yanıt durumlarını işle
+                // Yanıtları alalım ve updatedRewardPoints değerlerini kontrol edelim
                 const onaylanmışYanıtlar = userData.responses?.filter((r: any) => r.pointsApproved === true) || [];
+                let enGüncelPuan = null;
+
+                // Onaylanmış yanıtlardan en son güncellenen puan değerini alalım
+                if (onaylanmışYanıtlar.length > 0) {
+                    // Yanıtları son güncellenme tarihine göre sıralayalım
+                    const sıralıYanıtlar = [...onaylanmışYanıtlar].sort((a, b) => {
+                        const dateA = a.lastPointsUpdate ? new Date(a.lastPointsUpdate).getTime() : 0;
+                        const dateB = b.lastPointsUpdate ? new Date(b.lastPointsUpdate).getTime() : 0;
+                        return dateB - dateA; // Azalan sıralama (en yeni en üstte)
+                    });
+
+                    // En son güncellenen yanıtın updatedRewardPoints değerini alalım
+                    for (const yanıt of sıralıYanıtlar) {
+                        if (yanıt.updatedRewardPoints !== undefined) {
+                            enGüncelPuan = yanıt.updatedRewardPoints;
+                            console.log(`✅ En güncel updatedRewardPoints bulundu: ${enGüncelPuan}, yanıt: ${yanıt._id}`);
+                            break;
+                        }
+                    }
+                }
+
+                // Puan öncelik sıralaması: 
+                // 1. En son güncellenmiş yanıttaki updatedRewardPoints
+                // 2. userData.rewardPoints 
+                // 3. userData.points 
+                // 4. totalApprovedPoints 
+                // 5. 0 (varsayılan)
+                const userDisplayPoints =
+                    enGüncelPuan !== null ? enGüncelPuan :
+                        userData.rewardPoints ||
+                        userData.points ||
+                        userData.totalApprovedPoints ||
+                        0;
+
+                console.log('Gösterilecek puan değeri:', userDisplayPoints);
+                setDisplayPoints(userDisplayPoints);
+
+                // Puanları global state'e de kaydet - müşterinin context'teki puanlarını güncel tut
+                if (userData && typeof updateProfile === 'function') {
+                    // Sonsuz döngüyü önlemek için şimdilik doğrudan updateProfile çağrısı yapmıyoruz
+                    // ancak kullanıcı context'ini güncelleme işlemini optimize etmek adına
+                    // burada AuthContext'teki setUser fonksiyonunu kullanabiliriz
+                }
+
+                // Yanıt durumlarını işle
                 const bekleyenYanıtlar = userData.responses?.filter((r: any) => r.pointsApproved === null || r.pointsApproved === undefined) || [];
                 const reddedilenYanıtlar = userData.responses?.filter((r: any) => r.pointsApproved === false) || [];
 
@@ -726,7 +782,7 @@ const Customer = () => {
                                                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
                                                     <EmojiEventsIcon sx={{ mr: 2, fontSize: 36, color: '#ffeb3b' }} />
                                                     <Typography variant="h4" component="div" sx={{ fontWeight: 'bold' }}>
-                                                        {profileData.user.totalApprovedPoints || profileData.user.points || 0}
+                                                        {displayPoints}
                                                     </Typography>
                                                 </Box>
                                                 <Typography variant="subtitle1" align="center" sx={{ fontWeight: 'medium' }}>

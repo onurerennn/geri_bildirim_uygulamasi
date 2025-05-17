@@ -246,9 +246,12 @@ export const getUserProfile = async (req: Request, res: ExpressResponse) => {
             total + (resp.rewardPoints || 0), 0);
 
         // Kullanıcı puanlarını güncelle (eğer veritabanındaki değer farklıysa)
-        if (user.points !== totalApprovedPoints) {
+        if (user.points !== totalApprovedPoints || user.rewardPoints !== totalApprovedPoints) {
             console.log('Kullanıcı puanları güncellenecek:', {
-                eski: user.points || 0,
+                eski: {
+                    points: user.points || 0,
+                    rewardPoints: user.rewardPoints || 0
+                },
                 yeni: totalApprovedPoints
             });
 
@@ -256,27 +259,36 @@ export const getUserProfile = async (req: Request, res: ExpressResponse) => {
                 // Kullanıcı puanlarını güncelle
                 await User.findByIdAndUpdate(
                     user._id,
-                    { points: totalApprovedPoints }
+                    {
+                        points: totalApprovedPoints,
+                        rewardPoints: totalApprovedPoints
+                    }
                 );
 
                 // user nesnesini de güncelle
                 user.points = totalApprovedPoints;
-                console.log('Kullanıcı puanları güncellendi:', totalApprovedPoints);
+                user.rewardPoints = totalApprovedPoints;
+                console.log('Kullanıcı puanları güncellendi:', {
+                    points: totalApprovedPoints,
+                    rewardPoints: totalApprovedPoints
+                });
             } catch (updateError) {
                 console.error('Puan güncellenirken hata:', updateError);
                 // Hatayı yut, işleme devam et
             }
         }
 
-        // Kullanıcı ve yanıt bilgilerini döndür
+        // 5. Kullanıcı ve yanıt bilgilerini döndür
         return res.status(200).json({
             success: true,
             data: {
                 user: {
-                    ...user.toObject(),
-                    points: totalApprovedPoints, // Hesaplanan değeri doğrudan kullan
-                    totalApprovedPoints,
-                    potentialPendingPoints
+                    ...user.toJSON(),
+                    points: totalApprovedPoints, // Her zaman hesaplanan değeri kullan
+                    rewardPoints: totalApprovedPoints, // rewardPoints değerini de aynı değere ayarla
+                    totalApprovedPoints: totalApprovedPoints, // Toplam onaylı puanları da ekle
+                    // Müşterinin puan işlem geçmişini ekle
+                    pointTransactions: user.pointTransactions || []
                 },
                 responses: approvedResponses,
                 pendingResponses: pendingResponses,
@@ -574,4 +586,404 @@ const getFinishedSurveysForUser = async (req: Request, res: ExpressResponse) => 
     } catch (error) {
         // ... hata yönetimi
     }
+};
+
+// Müşterinin puanlarını kullan
+export const useRewardPoints = async (req: Request, res: ExpressResponse) => {
+    try {
+        const { customerName, points: pointsToUse, description } = req.body;
+
+        console.log('🔍 Puan kullanma isteği geldi:', {
+            customerName,
+            pointsToUse,
+            description
+        });
+
+        // Giriş doğrulama
+        if (!customerName || !pointsToUse || pointsToUse <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Müşteri adı ve geçerli puan miktarı gereklidir'
+            });
+        }
+
+        // 1. Müşteri adına göre kullanıcıyı bul
+        let customer = await User.findOne({
+            name: { $regex: new RegExp(customerName, 'i') }, // Büyük-küçük harf duyarsız arama
+            role: UserRole.CUSTOMER
+        });
+
+        console.log('🔍 Müşteri kaydı arama sonucu:', customer ? {
+            id: customer._id,
+            name: customer.name,
+            points: customer.points,
+            role: customer.role
+        } : 'Bulunamadı');
+
+        // Tüm müşteri yanıtlarını topla ve puan durumunu kontrol et
+        console.log('🔍 Tüm yanıtlar üzerinden müşterinin puanlarını hesaplıyorum...');
+        const allCustomerResponses = await ResponseModel.find({
+            customerName: { $regex: new RegExp(customerName, 'i') },
+            pointsApproved: true
+        });
+
+        console.log(`🔍 Bulunan onaylı yanıt sayısı: ${allCustomerResponses.length}`);
+
+        // Ayrıntılı olarak yanıtları ve puanları konsola yazdır
+        allCustomerResponses.forEach((resp, index) => {
+            console.log(`Yanıt #${index + 1}: ID=${resp._id}, Puan=${resp.rewardPoints || 0}, Onaylı=${resp.pointsApproved}, GüncelPuan=${resp.updatedRewardPoints || 'Tanımsız'}`);
+        });
+
+        // En güncel puan değerini bulmak için son güncellenen yanıtı al
+        let latestResponse = null;
+        let actualCurrentPoints = 0;
+
+        if (allCustomerResponses.length > 0) {
+            // Son güncelleme tarihine göre sırala
+            const sortedResponses = [...allCustomerResponses].sort((a, b) => {
+                const dateA = a.lastPointsUpdate ? new Date(a.lastPointsUpdate).getTime() : 0;
+                const dateB = b.lastPointsUpdate ? new Date(b.lastPointsUpdate).getTime() : 0;
+                return dateB - dateA; // Azalan sıralama (en yeni en üstte)
+            });
+
+            latestResponse = sortedResponses[0];
+
+            // Eğer son yanıtta updatedRewardPoints varsa, bu en güncel puan değeridir
+            if (latestResponse.updatedRewardPoints !== undefined) {
+                actualCurrentPoints = latestResponse.updatedRewardPoints;
+                console.log(`🔍 En güncel updatedRewardPoints kullanılıyor: ${actualCurrentPoints} (Yanıt ID: ${latestResponse._id})`);
+            }
+        }
+
+        // Eğer updatedRewardPoints yoksa, onaylı yanıtlardan toplam puanı hesapla
+        const totalApprovedPoints = allCustomerResponses.reduce((total, resp) =>
+            total + (resp.rewardPoints || 0), 0);
+
+        console.log('🔍 Tüm onaylı yanıtlardan hesaplanan toplam puan:', totalApprovedPoints);
+
+        // Eğer updatedRewardPoints değeri bulunamadıysa, toplamı kullan
+        if (actualCurrentPoints === 0) {
+            actualCurrentPoints = totalApprovedPoints;
+            console.log(`🔍 updatedRewardPoints bulunamadı, toplam puan kullanılıyor: ${totalApprovedPoints}`);
+        }
+
+        // Eğer müşteri kaydı bulunamadıysa
+        if (!customer) {
+            // Yanıt tablosundan müşteri bilgilerini ara
+            const response = await ResponseModel.findOne({
+                customerName: { $regex: new RegExp(customerName, 'i') }
+            });
+
+            console.log('🔍 Yanıt tablosunda müşteri arama sonucu:', response ? {
+                responseId: response._id,
+                customerName: response.customerName,
+                rewardPoints: response.rewardPoints,
+                pointsApproved: response.pointsApproved
+            } : 'Bulunamadı');
+
+            if (!response) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Müşteri bulunamadı'
+                });
+            }
+
+            // Yeterli puan var mı kontrol et
+            if (actualCurrentPoints >= pointsToUse) {
+                console.log('✅ Yeterli puanlar bulundu, sanal puan kullanımına izin veriliyor');
+
+                return res.status(200).json({
+                    success: true,
+                    message: 'Müşteri kaydı oluşturulmamış, ancak puan kullanımı onaylandı',
+                    data: {
+                        customerName: response.customerName,
+                        originalPoints: actualCurrentPoints,
+                        usedPoints: pointsToUse,
+                        remainingPoints: actualCurrentPoints - pointsToUse,
+                        virtual: true
+                    }
+                });
+            } else {
+                console.log('❌ Yeterli puan bulunamadı:', {
+                    mevcut: actualCurrentPoints,
+                    istenen: pointsToUse
+                });
+
+                return res.status(400).json({
+                    success: false,
+                    message: 'Müşterinin yeterli puanı bulunmamaktadır',
+                    data: {
+                        availablePoints: actualCurrentPoints,
+                        requestedPoints: pointsToUse,
+                        fark: pointsToUse - actualCurrentPoints
+                    }
+                });
+            }
+        }
+
+        // Kullanıcı modelinde, rewardPoints veya points değeri yukarıda hesapladığımız güncel puandan farklıysa güncelle
+        if (customer.rewardPoints !== actualCurrentPoints || customer.points !== actualCurrentPoints) {
+            console.log('⚠️ Müşteri puanları güncel değil, güncellenecek:', {
+                eski: { points: customer.points, rewardPoints: customer.rewardPoints },
+                yeni: actualCurrentPoints
+            });
+
+            customer.points = actualCurrentPoints;
+            customer.rewardPoints = actualCurrentPoints;
+            await customer.save();
+
+            console.log('✅ Müşteri puanları güncellendi:', actualCurrentPoints);
+        }
+
+        // Müşteri kayıtlı kullanıcı olarak bulundu, puan düşümü işlemini yap
+        console.log('💰 Puan düşümü işlemi başlatılıyor:', {
+            müşteriAdı: customer.name,
+            mevcutPuan: actualCurrentPoints,
+            kullanılacakPuan: pointsToUse,
+            açıklama: description
+        });
+
+        if (actualCurrentPoints < pointsToUse) {
+            console.log('❌ Yetersiz puan:', {
+                mevcut: actualCurrentPoints,
+                istenen: pointsToUse,
+                fark: pointsToUse - actualCurrentPoints
+            });
+
+            return res.status(400).json({
+                success: false,
+                message: 'Müşterinin yeterli puanı bulunmamaktadır',
+                data: {
+                    customerName: customer.name,
+                    availablePoints: actualCurrentPoints,
+                    requestedPoints: pointsToUse
+                }
+            });
+        }
+
+        // Yeni güncel puan
+        const newPoints = actualCurrentPoints - pointsToUse;
+
+        // Puanları düş
+        customer.points = newPoints;
+        customer.rewardPoints = newPoints;
+
+        // Puan kullanım kaydını tut
+        if (!customer.pointTransactions) {
+            customer.pointTransactions = [];
+        }
+
+        // Puan kullanımı için yeni transaction ekle
+        customer.pointTransactions.push({
+            date: new Date(),
+            amount: -pointsToUse,
+            description: description || 'Puan kullanımı',
+            processedBy: req.user?._id
+        });
+
+        // Önce customer.save() ile direkt olarak kaydet
+        try {
+            // Önce customer nesnesini doğrudan güncelle (birincil güncelleme yöntemi)
+            await customer.save();
+            console.log('✅ customer.save() ile müşteri puanları direkt güncellendi:', {
+                points: customer.points,
+                rewardPoints: customer.rewardPoints || customer.points
+            });
+        } catch (saveError) {
+            console.error('❌ customer.save() ile güncelleme başarısız oldu:', saveError);
+        }
+
+        // Değişiklikleri veritabanına kaydet - ikinci güncelleme yöntemi olarak findByIdAndUpdate kullan
+        try {
+            // Güncel puanı veritabanına doğrudan kaydet - rewardPoints değerini kullanarak
+            const userUpdateResult = await User.findByIdAndUpdate(
+                customer._id,
+                {
+                    $set: {
+                        points: newPoints,
+                        rewardPoints: newPoints
+                    },
+                    $push: {
+                        pointTransactions: {
+                            date: new Date(),
+                            amount: -pointsToUse,
+                            description: description || 'Puan kullanımı',
+                            processedBy: req.user?._id
+                        }
+                    }
+                },
+                { new: true, runValidators: true } // Güncellenmiş dökümanı döndür ve validasyon yap
+            );
+
+            if (!userUpdateResult) {
+                throw new Error('Kullanıcı güncellenemedi');
+            }
+
+            // Güncel kullanıcı verisini customer değişkenine atayalım ki response'da doğru veri dönsün
+            customer = userUpdateResult;
+
+            console.log('✅ Müşteri puan bilgisi veritabanında güncellendi: ', {
+                points: customer.points,
+                rewardPoints: customer.rewardPoints || customer.points
+            });
+
+            // Müşteri yanıtlarını da güncelle
+            await ResponseModel.updateMany(
+                { customerName: { $regex: new RegExp(customerName, 'i') } },
+                {
+                    $set: {
+                        lastPointsUpdate: new Date(),
+                        // Yanıt modelinde de rewardPoints güncellemesi
+                        updatedRewardPoints: newPoints
+                    }
+                }
+            );
+
+            console.log('✅ Müşteri yanıtları güncellendi, son işlem tarihi kaydedildi.');
+
+            // Frontend'e güncel puan bilgisini bildir
+            return res.status(200).json({
+                success: true,
+                message: 'Puanlar başarıyla kullanıldı',
+                data: {
+                    customerName: customer?.name || 'İsimsiz',
+                    originalPoints: actualCurrentPoints,
+                    usedPoints: pointsToUse,
+                    remainingPoints: newPoints,
+                    updatedRewardPoints: newPoints,
+                    date: new Date()
+                }
+            });
+        } catch (updateError) {
+            console.error('❌ Puan güncelleme hatası:', updateError);
+
+            // Hata durumunda save ile tekrar dene
+            try {
+                console.log('⚠️ findByIdAndUpdate başarısız oldu, customer.save() ile tekrar deneniyor...');
+
+                // Puanları güncelleyelim
+                customer.points = newPoints;
+                customer.rewardPoints = newPoints;
+
+                await customer.save();
+                console.log('✅ customer.save() ile puan bilgisi kaydedildi. Yeni puan:', newPoints);
+
+                // Müşteri yanıtlarını da güncelle
+                await ResponseModel.updateMany(
+                    { customerName: { $regex: new RegExp(customerName, 'i') } },
+                    {
+                        $set: {
+                            lastPointsUpdate: new Date(),
+                            updatedRewardPoints: newPoints
+                        }
+                    }
+                );
+
+                console.log('✅ Müşteri yanıtları güncellendi, son işlem tarihi kaydedildi.');
+
+                // Frontend'e güncel puan bilgisini bildir
+                return res.status(200).json({
+                    success: true,
+                    message: 'Puanlar başarıyla kullanıldı',
+                    data: {
+                        customerName: customer?.name || 'İsimsiz',
+                        originalPoints: actualCurrentPoints,
+                        usedPoints: pointsToUse,
+                        remainingPoints: newPoints,
+                        updatedRewardPoints: newPoints,
+                        date: new Date()
+                    }
+                });
+            } catch (saveError) {
+                console.error('❌❌ customer.save() de başarısız oldu:', saveError);
+                throw saveError; // Bu hatayı üst seviyeye ilet
+            }
+        }
+    } catch (error: any) {
+        console.error('Puan kullanım hatası:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Puanlar kullanılırken bir hata oluştu',
+            error: error.message
+        });
+    }
+};
+
+// Puan düşümü işlemi artık doğrudan useRewardPoints içinde yapılıyor, bu fonksiyon artık kullanılmıyor
+const processPointDeduction = async (
+    customer: any,
+    pointsToUse: number,
+    description: string,
+    req: Request,
+    res: ExpressResponse
+) => {
+    // Bu fonksiyon artık kullanılmıyor
+    console.log('❌ DEPRECATED: processPointDeduction işlevi çağrıldı, ancak artık kullanımda değil');
+    console.log('💡 Lütfen useRewardPoints fonksiyonunu doğrudan kullanın');
+
+    // Müşterinin yeterli puanı var mı kontrol et
+    const currentPoints = customer.points || 0;
+
+    console.log('💰 Puan düşümü işlemi başlatılıyor:', {
+        müşteriAdı: customer.name,
+        mevcutPuan: currentPoints,
+        kullanılacakPuan: pointsToUse,
+        açıklama: description
+    });
+
+    if (currentPoints < pointsToUse) {
+        console.log('❌ Yetersiz puan:', {
+            mevcut: currentPoints,
+            istenen: pointsToUse,
+            fark: pointsToUse - currentPoints
+        });
+
+        return res.status(400).json({
+            success: false,
+            message: 'Müşterinin yeterli puanı bulunmamaktadır',
+            data: {
+                customerName: customer.name,
+                availablePoints: currentPoints,
+                requestedPoints: pointsToUse
+            }
+        });
+    }
+
+    // Puanları düş
+    customer.points = currentPoints - pointsToUse;
+
+    // Puan kullanım kaydını tut
+    if (!customer.pointTransactions) {
+        customer.pointTransactions = [];
+    }
+
+    // Yeni işlemi kaydet
+    customer.pointTransactions.push({
+        date: new Date(),
+        amount: -pointsToUse, // Negatif değer (puan düşümü)
+        description: description || 'Puan kullanımı',
+        processedBy: req.user?._id // İşlemi yapan kullanıcı
+    });
+
+    // Değişiklikleri kaydet
+    await customer.save();
+
+    console.log('✅ Puan kullanımı başarılı:', {
+        müşteriAdı: customer.name,
+        öncekiPuan: currentPoints,
+        kullanılanPuan: pointsToUse,
+        kalanPuan: customer.points
+    });
+
+    return res.status(200).json({
+        success: true,
+        message: 'Puanlar başarıyla kullanıldı',
+        data: {
+            customerName: customer.name,
+            originalPoints: currentPoints,
+            usedPoints: pointsToUse,
+            remainingPoints: customer.points,
+            date: new Date()
+        }
+    });
 }; 

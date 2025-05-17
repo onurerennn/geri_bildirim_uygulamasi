@@ -795,7 +795,10 @@ export const submitSurveyResponse = async (req: Request, res: ExpressResponse) =
             });
         }
 
-        // Prepare base response data
+        // Müşteri yanıt nesnesi hazırlama
+        console.log('👤 Yanıt veren kullanıcı ID/bilgileri hazırlanıyor...');
+
+        // Temel yanıt nesnesini oluştur, userId hariç
         const responseData: any = {
             survey: finalSurveyId,
             business: surveyData.business,
@@ -803,11 +806,10 @@ export const submitSurveyResponse = async (req: Request, res: ExpressResponse) =
             rewardPoints: surveyData.rewardPoints || 0
         };
 
-        // Güvenli bir şekilde kullanıcı bilgilerini ekle
-        // 1. Kullanıcı oturum açmışsa (req.user varsa)
-        if (req.user) {
+        // userId sadece geçerli bir değer varsa ekle
+        if (req.user && req.user._id && mongoose.Types.ObjectId.isValid(req.user._id)) {
+            console.log(`✅ Giriş yapmış kullanıcı ID'si ekleniyor: ${req.user._id}`);
             responseData.userId = req.user._id;
-            console.log('👤 Kayıtlı kullanıcı yanıt gönderiyor:', req.user._id);
 
             // Oturum açmış kullanıcının bilgilerini direkt kullan
             try {
@@ -827,9 +829,11 @@ export const submitSurveyResponse = async (req: Request, res: ExpressResponse) =
             } catch (error) {
                 console.error('❌ Kullanıcı bilgileri alınırken hata:', error);
             }
+        } else {
+            console.log('❓ Kayıtlı kullanıcı ID\'si bulunamadı, formdan gelen müşteri bilgileri kullanılacak');
         }
 
-        // 2. Anket formunda müşteri bilgileri varsa kaydet (oturum yoksa veya eksik bilgi varsa)
+        // Anket formunda müşteri bilgileri varsa ve daha önce eklenmemişse kullan
         if (customer && (!responseData.customer || !responseData.customerName)) {
             console.log('📋 Formdan müşteri bilgileri alınıyor:', customer);
 
@@ -849,7 +853,8 @@ export const submitSurveyResponse = async (req: Request, res: ExpressResponse) =
                 responseData.customer = {
                     name: responseData.customerName || 'İsimsiz Müşteri',
                     email: responseData.customerEmail || '',
-                    _id: (req.user && req.user._id) ? req.user._id.toString() : undefined
+                    // _id alanını sadece geçerli bir ID varsa ekle, yoksa ekleme
+                    _id: (responseData.userId) ? responseData.userId.toString() : undefined
                 };
             }
 
@@ -879,44 +884,225 @@ export const submitSurveyResponse = async (req: Request, res: ExpressResponse) =
         });
 
         // Aynı kişi aynı ankete daha önce yanıt vermiş mi kontrol et
+        // Kaydetmeye çalışmadan önce kontrol et
         try {
-            // Save the response
-            const response = await Response.create(responseData);
-            console.log(`✅ Anket yanıtı başarıyla kaydedildi: ${response._id}`);
+            // Sadece AYNI kullanıcı için duplicate kontrolü yapacağız
+            let existingResponse = null;
 
-            // Return response
-            return res.status(201).json({
-                success: true,
-                message: 'Survey response submitted successfully',
-                data: response,
-                rewardPoints: surveyData.rewardPoints || 0
-            });
-        } catch (dbError: any) {
-            // Unique indeks hatası durumunda (aynı kullanıcı aynı ankete tekrar yanıt vermişse)
-            if (dbError.name === 'MongoError' || dbError.name === 'MongoServerError') {
-                if (dbError.code === 11000) { // Duplicate key error code
-                    console.log(`❌ Bu kullanıcı bu ankete daha önce yanıt vermiş: ${responseData.customerName}`);
-
-                    // Önceki yanıtı bul
-                    const existingResponse = await Response.findOne({
+            // 1. Giriş yapmış kullanıcı ise (userId varsa), userId'ye göre kontrol et
+            if (responseData.userId) {
+                console.log(`👤 Kayıtlı kullanıcı kontrolü - userId: ${responseData.userId}`);
+                existingResponse = await Response.findOne({
+                    survey: finalSurveyId,
+                    userId: responseData.userId
+                });
+            }
+            // 2. Kullanıcının ID'si yoksa ama diğer tanımlayıcı alanları varsa
+            else {
+                // Sadece kullanıcı bilgileri (name, email) aynı ise kontrol et
+                if (responseData.customerName && responseData.customerEmail) {
+                    console.log(`👤 Aynı isim ve email kontrolü: ${responseData.customerName}, ${responseData.customerEmail}`);
+                    existingResponse = await Response.findOne({
                         survey: finalSurveyId,
-                        'customer.name': responseData.customerName
+                        customerName: responseData.customerName,
+                        customerEmail: responseData.customerEmail
                     });
-
-                    // Başarılı mesajı ve bilgi döndür, ama existingResponse olduğunu belirt
-                    return res.status(200).json({
-                        success: true,
-                        message: 'Bu ankete daha önce yanıt verdiniz. Önceki yanıtınız kaydedilmiştir.',
-                        isExistingResponse: true,
-                        data: existingResponse,
-                        rewardPoints: 0 // Tekrar puan verme
+                }
+                // Sadece isim varsa ve anonim değilse
+                else if (responseData.customerName && !responseData.customerName.startsWith('Anonim')) {
+                    console.log(`👤 Sadece isim kontrolü: ${responseData.customerName}`);
+                    existingResponse = await Response.findOne({
+                        survey: finalSurveyId,
+                        customerName: responseData.customerName
                     });
                 }
             }
 
-            // Diğer veritabanı hataları için
+            if (existingResponse) {
+                // Bulunan yanıtın bu kullanıcıya ait olduğundan emin ol
+                const isOwnResponse =
+                    // userId eşleşiyorsa
+                    (responseData.userId && existingResponse.userId &&
+                        responseData.userId.toString() === existingResponse.userId.toString()) ||
+                    // Veya customerName ve customerEmail eşleşiyorsa
+                    (responseData.customerName && responseData.customerEmail &&
+                        existingResponse.customerName === responseData.customerName &&
+                        existingResponse.customerEmail === responseData.customerEmail);
+
+                if (isOwnResponse) {
+                    console.log(`⚠️ Bu kullanıcı bu ankete daha önce yanıt vermiş:`, {
+                        responseId: existingResponse._id,
+                        customerName: existingResponse.customerName
+                    });
+
+                    return res.status(200).json({
+                        success: true,
+                        message: `Anket yanıtınız başarıyla gönderildi ve veritabanına kaydedildi.\n\n${responseData.customerName} olarak yanıtınız kaydedilmiştir.\n\nYanıt Durumu: Bu ankete daha önce yanıt vermişsiniz. Önceki yanıtınız geçerlidir.`,
+                        isExistingResponse: true,
+                        data: existingResponse,
+                        rewardPoints: 0 // Tekrar puan verme
+                    });
+                } else {
+                    // Farklı bir kullanıcının yanıtı bulundu, ama yanıt vermemize engel değil
+                    console.log(`ℹ️ Ankete başka bir kullanıcı yanıt vermiş, ama bu sorun değil.`);
+                }
+            }
+
+            // Daha önce yanıt yoksa veya farklı kullanıcı yanıtıysa, yeni yanıtı kaydet
+            console.log(`👤 Yeni yanıt oluşturuluyor: ${responseData.customerName}`);
+
+            // Aynı kullanıcı tarafından yanıt verilmiş mi son bir kez kontrol et
+            let isDuplicate = false;
+
+            try {
+                // 1. Kullanıcı ID'si varsa kontrol et
+                if (responseData.userId) {
+                    const existingByUserId = await Response.findOne({
+                        survey: finalSurveyId,
+                        userId: responseData.userId
+                    });
+
+                    if (existingByUserId) {
+                        console.log(`⚠️ Aynı userId için yanıt zaten var: ${responseData.userId}`);
+                        return res.status(200).json({
+                            success: true,
+                            message: `Anket yanıtınız başarıyla gönderildi ve veritabanına kaydedildi.\n\n${responseData.customerName} olarak yanıtınız kaydedilmiştir.\n\nYanıt Durumu: Bu ankete daha önce yanıt vermişsiniz. Önceki yanıtınız geçerlidir.`,
+                            isExistingResponse: true,
+                            data: existingByUserId,
+                            rewardPoints: 0
+                        });
+                    }
+                }
+
+                // 2. customerName ve customerEmail eşleşmesi kontrol et (aynı kişi olmasını yüksek olasılık)
+                if (responseData.customerName && responseData.customerEmail) {
+                    const existingByNameEmail = await Response.findOne({
+                        survey: finalSurveyId,
+                        customerName: responseData.customerName,
+                        customerEmail: responseData.customerEmail
+                    });
+
+                    if (existingByNameEmail) {
+                        console.log(`⚠️ Aynı isim ve email için yanıt zaten var: ${responseData.customerName}, ${responseData.customerEmail}`);
+                        return res.status(200).json({
+                            success: true,
+                            message: `Anket yanıtınız başarıyla gönderildi ve veritabanına kaydedildi.\n\n${responseData.customerName} olarak yanıtınız kaydedilmiştir.\n\nYanıt Durumu: Bu ankete daha önce yanıt vermişsiniz. Önceki yanıtınız geçerlidir.`,
+                            isExistingResponse: true,
+                            data: existingByNameEmail,
+                            rewardPoints: 0
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('❌ Son kontrol sırasında hata:', error);
+                // Hata olsa bile işleme devam et
+            }
+
+            // Hala çakışma yok, yanıtı kaydet
+            try {
+                console.log('💾 Yanıt veritabanına kaydediliyor...');
+                const response = await Response.create(responseData);
+                console.log(`✅ Anket yanıtı başarıyla kaydedildi: ${response._id}`);
+
+                // Return response
+                return res.status(201).json({
+                    success: true,
+                    message: `Anket yanıtınız başarıyla gönderildi ve veritabanına kaydedildi.\n\n${responseData.customerName} olarak yanıtınız kaydedilmiştir.\n\nYanıt Durumu: Yanıtınız başarıyla kaydedildi\n\nİşlem Sonucu:\nYanıtınız veritabanına kaydedildi ve işleniyor.`,
+                    data: response,
+                    rewardPoints: surveyData.rewardPoints || 0
+                });
+            } catch (saveError) {
+                console.error('❌ Yanıt kaydedilirken hata:', saveError);
+                // Dışarıdaki catch bloğuna aktar
+                throw saveError;
+            }
+        } catch (dbError: any) {
+            // MongoDB duplicate key hatası (11000)
+            if ((dbError.name === 'MongoError' || dbError.name === 'MongoServerError') && dbError.code === 11000) {
+                console.log(`❌ Veritabanı çakışma hatası:`, dbError.message);
+                console.log('Hata detayları:', {
+                    keyPattern: dbError.keyPattern || 'Bilinmiyor',
+                    keyValue: dbError.keyValue || 'Bilinmiyor',
+                    code: dbError.code
+                });
+
+                // Hangi alanda çakışma var?
+                let existingResponseQuery: any = { survey: finalSurveyId };
+                let foundDuplicateField = false;
+
+                // 1. userId çakışması
+                if (dbError.keyPattern && dbError.keyPattern.userId) {
+                    console.log(`👤 userId alanında çakışma var`);
+                    if (responseData.userId) {
+                        existingResponseQuery.userId = responseData.userId;
+                        foundDuplicateField = true;
+                    }
+                }
+                // 2. customer._id çakışması
+                else if (dbError.keyPattern && dbError.keyPattern['customer._id']) {
+                    console.log(`👤 customer._id alanında çakışma var`);
+                    if (responseData.customer && responseData.customer._id) {
+                        existingResponseQuery['customer._id'] = responseData.customer._id;
+                        foundDuplicateField = true;
+                    }
+                }
+                // 3. customerName çakışması
+                else if (dbError.keyPattern && dbError.keyPattern.customerName) {
+                    console.log(`👤 customerName alanında çakışma var`);
+                    if (responseData.customerName) {
+                        existingResponseQuery.customerName = responseData.customerName;
+                        foundDuplicateField = true;
+                    }
+                }
+                // 4. Diğer olası çakışmalar
+                else {
+                    console.log(`👤 Bilinmeyen bir alanda çakışma var:`, dbError.keyPattern);
+                    // MongoDB'nin key value bilgisini kullan
+                    if (dbError.keyValue) {
+                        existingResponseQuery = { ...dbError.keyValue };
+                        if (existingResponseQuery.survey) {
+                            foundDuplicateField = true;
+                        }
+                    }
+                }
+
+                // Eğer çakışma alanını tespit edebildiysek
+                if (foundDuplicateField) {
+                    console.log(`🔍 Çakışan yanıtı arıyorum:`, existingResponseQuery);
+                    try {
+                        const existingResponse = await Response.findOne(existingResponseQuery);
+
+                        if (existingResponse) {
+                            console.log(`✅ Çakışan yanıt bulundu: ${existingResponse._id}`);
+                            return res.status(200).json({
+                                success: true,
+                                message: `Anket yanıtınız işlendi.\n\n${responseData.customerName} olarak yanıtınız sistemde mevcut.\n\nYanıt Durumu: Bu ankete daha önce yanıt verilmiş. Önceki yanıt geçerlidir.`,
+                                isExistingResponse: true,
+                                data: existingResponse,
+                                rewardPoints: 0
+                            });
+                        }
+                    } catch (findError) {
+                        console.error(`❌ Çakışan yanıt aranırken hata:`, findError);
+                    }
+                }
+
+                // Eğer bulunamazsa veya farklı bir çakışma ise, daha genel bir yanıt
+                return res.status(200).json({
+                    success: false,
+                    message: 'Anket yanıtınız kaydedilemedi. Veritabanında bir çakışma tespit edildi.',
+                    error: 'Veritabanı çakışması',
+                    details: process.env.NODE_ENV === 'development' ? {
+                        message: dbError.message,
+                        keyPattern: dbError.keyPattern,
+                        keyValue: dbError.keyValue
+                    } : undefined
+                });
+            }
+
+            // Diğer veritabanı hataları
             console.error('❌ Veritabanı hatası:', dbError);
-            throw dbError; // Diğer hatalar için dışarıdaki catch bloğuna aktar
+            throw dbError;
         }
     } catch (error: any) {
         console.error('❌ Error submitting survey response:', error);
@@ -1525,7 +1711,7 @@ export const rejectResponsePoints = async (req: Request, res: ExpressResponse) =
                     );
 
                     console.log('✅ Kullanıcı puanları azaltıldı:', {
-                        userId: customerId,
+                        customerId,
                         öncekiPuan: currentPoints,
                         düşülenPuan: pointsToDeduct,
                         yeniToplamPuan: updatedPoints,

@@ -234,13 +234,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             business: updatedUserData.business || 'İşletme bilgisi yok',
             needsConfig: updatedUserData.needsBusinessConfig
         });
-
-        // Eğer BUSINESS_ADMIN kullanıcısı ve işletme bilgisi yoksa DevTools sayfasına yönlendir
-        if (updatedUserData.role === 'BUSINESS_ADMIN' && !updatedUserData.business) {
-            setTimeout(() => {
-                navigate('/dev-tools');
-            }, 500);
-        }
     };
 
     const logout = () => {
@@ -270,6 +263,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const token = localStorage.getItem('token');
             if (!token) return false;
 
+            // Sonsuz döngüyü engellemek için zaman damgası kontrolü
+            const lastUpdateTime = parseInt(localStorage.getItem('lastProfileUpdate') || '0', 10);
+            const currentTime = Date.now();
+
+            // Son güncellemeden bu yana 2 saniyeden az geçmişse, güncellemeyi atla
+            if (currentTime - lastUpdateTime < 2000) {
+                console.log("🛑 Çok sık profil güncellemesi isteği - atlanıyor");
+                return false;
+            }
+
+            // Zaman damgasını şimdi güncelle
+            localStorage.setItem('lastProfileUpdate', currentTime.toString());
+
             console.log("🔄 Kullanıcı profili güncelleniyor...");
 
             // Profil bilgilerini API'den al
@@ -292,7 +298,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     }
                 }
 
-                // Kullanıcı nesnesini güncelle, points alanını özellikle belirt
+                // Orijinal rolü sakla
+                const originalRole = currentUser?.role;
+                const originalBusiness = currentUser?.business;
+
+                console.log("Mevcut rol ve işletme:", {
+                    originalRole,
+                    originalBusiness,
+                    newRole: userData.role
+                });
+
+                // Kullanıcı nesnesini güncelle, points alanını özellikle belirt, rolü koru
                 const updatedUser = {
                     ...(currentUser || {}), // Mevcut verileri koru
                     ...userData,
@@ -300,7 +316,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     points: userData.points || userData.totalApprovedPoints || 0,
                     // Oturum kontrolü için gerekli alanları koru
                     isActive: userData.isActive !== false,
-                    role: userData.role || 'CUSTOMER'
+                    // Orijinal rolü ve işletme bilgisini koru
+                    role: originalRole || userData.role || 'CUSTOMER',
+                    business: originalBusiness || userData.business
                 };
 
                 // Puanları kontrol et ve logla
@@ -313,7 +331,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 // LocalStorage'ı güncelle
                 localStorage.setItem('user', JSON.stringify(updatedUser));
 
-                console.log("✅ Kullanıcı profili güncellendi:", updatedUser.name);
+                console.log("✅ Kullanıcı profili güncellendi:", {
+                    name: updatedUser.name,
+                    role: updatedUser.role, // Değişim olmadığını doğrula
+                    business: updatedUser.business
+                });
                 return true;
             }
 

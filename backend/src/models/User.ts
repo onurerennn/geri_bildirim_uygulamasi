@@ -2,20 +2,55 @@ import mongoose from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import { UserRole } from '../types/UserRole';
 
+// Puan işlemleri için interface
+export interface IPointTransaction {
+    date: Date;
+    amount: number; // Pozitif veya negatif değer olabilir
+    description: string;
+    processedBy?: mongoose.Types.ObjectId;
+}
+
 export interface IUser extends mongoose.Document {
+    _id: mongoose.Types.ObjectId;
     name: string;
     email: string;
     password: string;
     role: UserRole;
     isActive: boolean;
     business?: mongoose.Types.ObjectId;
-    points: number;
-    completedSurveys: mongoose.Types.ObjectId[];
+    completedSurveys?: mongoose.Types.ObjectId[];
+    points?: number;
+    rewardPoints?: number; // Kullanıcının ödül puanları - Ödül sistemi için kullanılan temel puan değeri
+    pointTransactions?: Array<{
+        date: Date;
+        amount: number;
+        description: string;
+        processedBy?: mongoose.Types.ObjectId;
+    }>;
     createdAt: Date;
     updatedAt: Date;
     comparePassword(candidatePassword: string): Promise<boolean>;
     toJSON(): any;
 }
+
+const pointTransactionSchema = new mongoose.Schema({
+    date: {
+        type: Date,
+        default: Date.now
+    },
+    amount: {
+        type: Number,
+        required: true
+    },
+    description: {
+        type: String,
+        required: true
+    },
+    processedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    }
+});
 
 const userSchema = new mongoose.Schema<IUser>(
     {
@@ -60,7 +95,13 @@ const userSchema = new mongoose.Schema<IUser>(
         completedSurveys: [{
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Survey'
-        }]
+        }],
+        rewardPoints: {
+            type: Number,
+            default: 0,
+            description: 'Müşterinin ödül sisteminde kullanabileceği toplam puan miktarı. Bu değer points ile senkronize tutulmalıdır.'
+        },
+        pointTransactions: [pointTransactionSchema] // Puan işlemleri geçmişi
     },
     {
         timestamps: true
