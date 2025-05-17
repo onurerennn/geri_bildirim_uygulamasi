@@ -55,6 +55,7 @@ const NewSurvey: React.FC = () => {
         description: '',
         startDate: new Date().toISOString().split('T')[0],
         endDate: new Date(new Date().setDate(new Date().getDate() + 30)).toISOString().split('T')[0],
+        rewardPoints: 10,
         questions: [
             {
                 text: '',
@@ -225,6 +226,7 @@ const NewSurvey: React.FC = () => {
                 startDate: startDateObj,
                 endDate: endDateObj,
                 business: user.business,
+                rewardPoints: Number(formData.rewardPoints),
                 questions: formData.questions.map(q => {
                     const result: Question = {
                         text: q.text,
@@ -324,14 +326,26 @@ const NewSurvey: React.FC = () => {
                             sx={{ mb: 2 }}
                         />
                         <TextField
-                            label="Anket Açıklaması"
+                            fullWidth
+                            label="Açıklama"
                             name="description"
+                            multiline
+                            rows={4}
                             value={formData.description}
                             onChange={handleChange}
-                            fullWidth
+                            margin="normal"
                             required
-                            multiline
-                            rows={2}
+                        />
+                        <TextField
+                            fullWidth
+                            label="Ödül Puanı"
+                            name="rewardPoints"
+                            type="number"
+                            value={formData.rewardPoints}
+                            onChange={handleChange}
+                            margin="normal"
+                            helperText="Anketi tamamlayan müşteriye verilecek puan"
+                            InputProps={{ inputProps: { min: 0 } }}
                         />
                     </Box>
 

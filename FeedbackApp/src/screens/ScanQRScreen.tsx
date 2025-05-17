@@ -50,44 +50,45 @@ const ScanQRScreen: React.FC<NavigationProps> = ({ navigation }) => {
             setIsLoading(true);
             setError('');
 
-            // API isteği ile kod kontrolü yap
-            console.log(`Kod ile anket aranıyor: ${code}`);
-            const response = await fetch(`${api.getApiUrl()}/api/surveys/code/${code}`);
-
-            if (!response.ok) {
-                if (response.status === 404) {
-                    throw new Error('Geçersiz anket kodu. Lütfen doğru kodu girdiğinizden emin olun.');
-                } else {
-                    throw new Error('Anket bilgileri alınamadı. Lütfen daha sonra tekrar deneyin.');
-                }
+            // Kod formatını kontrol et
+            const cleanCode = code.trim();
+            if (!cleanCode) {
+                setError('Lütfen geçerli bir kod girin');
+                return;
             }
 
-            const data = await response.json();
-            console.log('Anket bulundu:', data);
+            // API isteği ile kod kontrolü yap
+            console.log(`Kod ile anket aranıyor: ${cleanCode}`);
+            const response = await api.surveys.getByCode(cleanCode);
+
+            if (!response.success) {
+                throw new Error(response.error || 'Anket bulunamadı');
+            }
+
+            const surveyData = response.data;
+            if (!surveyData || !surveyData._id || !Array.isArray(surveyData.questions)) {
+                throw new Error('Geçersiz anket verisi');
+            }
+
+            console.log('Anket bulundu:', surveyData._id);
 
             // QR kodun taranma sayısını artır
             try {
-                await fetch(`${api.getApiUrl()}/api/surveys/qr/scan`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ code })
-                });
+                await api.surveys.recordScan(cleanCode);
             } catch (error) {
-                console.error('Tarama kaydedilemedi:', error);
+                console.warn('Tarama kaydedilemedi:', error);
                 // Bu hata kritik değil, devam edebiliriz
             }
 
             // Anketi göster
             navigation.navigate('SurveyForm', {
-                surveyId: data._id || data.id,
-                code: code
+                surveyId: surveyData._id,
+                code: cleanCode
             });
 
-        } catch (err: any) {
-            console.error('Kod işleme hatası:', err);
-            setError(err.message || 'Anket yüklenirken bir hata oluştu');
+        } catch (error: any) {
+            console.error('Kod işleme hatası:', error);
+            setError(error.message || 'Anket yüklenirken bir hata oluştu. Lütfen kodu kontrol edip tekrar deneyin.');
         } finally {
             setIsLoading(false);
         }

@@ -69,8 +69,28 @@ const protect = (req, res, next) => __awaiter(void 0, void 0, void 0, function* 
                 console.log('BUSINESS_ADMIN kullanıcısı, işletme bilgisi kontrol ediliyor');
                 if (!user.business) {
                     console.warn('BUSINESS_ADMIN kullanıcısının işletme bilgisi yok:', user._id);
-                    // İşletme bilgisini yoksa oluşturmak için bir işlem yapabilirsiniz
-                    // Bu kısım opsiyonel - geliştirme süreci için
+                    // İşletme bulunamadı, varsayılan bir işletme arayalım
+                    try {
+                        // Sistemdeki ilk aktif işletmeyi bulalım
+                        const defaultBusiness = yield require('../models/Business').default.findOne({ isActive: true });
+                        if (defaultBusiness) {
+                            console.log('Varsayılan işletme bulundu, kullanıcıya atanıyor:', defaultBusiness._id);
+                            // Kullanıcıya işletme ID'sini atayalım ve kaydedelim
+                            user.business = defaultBusiness._id;
+                            yield User_1.default.findByIdAndUpdate(user._id, { business: defaultBusiness._id });
+                            console.log('Kullanıcıya işletme atandı:', {
+                                userId: user._id,
+                                businessId: defaultBusiness._id,
+                                businessName: defaultBusiness.name
+                            });
+                        }
+                        else {
+                            console.warn('Varsayılan işletme bulunamadı. İşletme oluşturulmalı.');
+                        }
+                    }
+                    catch (businessError) {
+                        console.error('İşletme atama hatası:', businessError);
+                    }
                 }
                 else {
                     console.log('İşletme bilgisi mevcut:', user.business);
@@ -104,7 +124,8 @@ const protect = (req, res, next) => __awaiter(void 0, void 0, void 0, function* 
             }
             return res.status(401).json({
                 success: false,
-                message: 'Kimlik doğrulama başarısız'
+                message: 'Kimlik doğrulama başarısız',
+                error: process.env.NODE_ENV === 'development' ? error.message : 'Doğrulama hatası'
             });
         }
     }
@@ -113,7 +134,8 @@ const protect = (req, res, next) => __awaiter(void 0, void 0, void 0, function* 
         console.error('Hata detayları:', error);
         return res.status(401).json({
             success: false,
-            message: 'Kimlik doğrulama başarısız'
+            message: 'Kimlik doğrulama başarısız',
+            error: process.env.NODE_ENV === 'development' ? error.message : 'İşlem hatası'
         });
     }
 });
@@ -121,26 +143,36 @@ exports.protect = protect;
 // Admin yetki kontrolü
 const authorize = (...roles) => {
     return (req, res, next) => {
-        // Flatten roles array in case nested arrays are passed
-        const flattenedRoles = roles.flat();
-        console.log('Yetki kontrolü, gereken roller:', flattenedRoles);
-        if (!req.user) {
-            console.error('Yetki kontrolü: Kullanıcı bilgisi bulunamadı');
-            return res.status(401).json({
+        try {
+            // Flatten roles array in case nested arrays are passed
+            const flattenedRoles = roles.flat();
+            console.log('Yetki kontrolü, gereken roller:', flattenedRoles);
+            if (!req.user) {
+                console.error('Yetki kontrolü: Kullanıcı bilgisi bulunamadı');
+                return res.status(401).json({
+                    success: false,
+                    message: 'Giriş yapmanız gerekiyor'
+                });
+            }
+            console.log('Kullanıcı rolü:', req.user.role, 'Gereken roller:', flattenedRoles);
+            if (!flattenedRoles.includes(req.user.role)) {
+                console.error('Yetki kontrolü başarısız. Kullanıcı rolü:', req.user.role, 'Gereken roller:', flattenedRoles);
+                return res.status(403).json({
+                    success: false,
+                    message: 'Bu işlemi gerçekleştirmek için yetkiniz yok'
+                });
+            }
+            console.log('Yetki kontrolü başarılı, işlem devam ediyor');
+            next();
+        }
+        catch (error) {
+            console.error('Yetki kontrolü hatası:', error);
+            return res.status(500).json({
                 success: false,
-                message: 'Giriş yapmanız gerekiyor'
+                message: 'Yetkilendirme işlemi sırasında bir hata oluştu',
+                error: process.env.NODE_ENV === 'development' ? error.message : 'Yetkilendirme hatası'
             });
         }
-        console.log('Kullanıcı rolü:', req.user.role, 'Gereken roller:', flattenedRoles);
-        if (!flattenedRoles.includes(req.user.role)) {
-            console.error('Yetki kontrolü başarısız. Kullanıcı rolü:', req.user.role, 'Gereken roller:', flattenedRoles);
-            return res.status(403).json({
-                success: false,
-                message: 'Bu işlemi gerçekleştirmek için yetkiniz yok'
-            });
-        }
-        console.log('Yetki kontrolü başarılı, işlem devam ediyor');
-        next();
     };
 };
 exports.authorize = authorize;

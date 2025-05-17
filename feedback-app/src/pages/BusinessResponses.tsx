@@ -15,13 +15,28 @@ import {
     Card,
     CardContent,
     Divider,
-    Button
+    Button,
+    IconButton,
+    Tooltip,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogContentText,
+    DialogActions,
+    TextField,
+    Chip,
+    Snackbar
 } from '@mui/material';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { surveyService } from '../services/surveyService';
+import apiService from '../services/api';
 // @ts-ignore
 import moment from 'moment';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import CancelIcon from '@mui/icons-material/Cancel';
+import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
+import DeleteIcon from '@mui/icons-material/Delete';
 
 // API'den gelen yanıt türleri için arayüzler
 interface ResponseData {
@@ -41,15 +56,23 @@ interface ResponseData {
         name: string;
         email: string;
     };
+    userId?: {
+        _id: string;
+        name: string;
+        email: string;
+    } | string; // Hem popüle edilmiş nesne hem de string olabilir
+    customerName?: string; // Eski API yanıtları için geriye dönük uyumluluk
+    customerEmail?: string; // Eski API yanıtları için geriye dönük uyumluluk
     createdAt: string;
+    rewardPoints?: number;
+    pointsApproved?: boolean;
 }
 
 // MongoDB ObjectID formatını kontrol eden yardımcı fonksiyon
 const isMongoId = (value: string): boolean => {
     if (!value) return false;
     // Eğer değer bir kullanıcı tarafından girildiği belli olan bir string ise, MongoDB ID olarak işaretlemeyelim
-    if (value === "dasda" || value === "deneme" ||
-        value.includes(" ") || // Boşluk içeren isimler
+    if (value.includes(" ") || // Boşluk içeren isimler
         value.length < 10 || // Kısa isimler
         /[ğüşıöçĞÜŞİÖÇ]/.test(value)) { // Türkçe karakter içerenler
         return false;
@@ -66,6 +89,14 @@ const BusinessResponses = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [survey, setSurvey] = useState<any>(null);
+    const [openApproveDialog, setOpenApproveDialog] = useState(false);
+    const [selectedResponse, setSelectedResponse] = useState<ResponseData | null>(null);
+    const [approvedPoints, setApprovedPoints] = useState<number>(0);
+    const [operationLoading, setOperationLoading] = useState(false);
+    const [successMessage, setSuccessMessage] = useState<string | null>(null);
+    const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
+    // Tüm anketlerin başlıklarını saklamak için global bir harita oluşturuyoruz
+    const surveyTitleMap: Record<string, string> = {};
 
     // fetchResponses fonksiyonunu useCallback ile sarıyoruz
     const fetchResponses = useCallback(async () => {
@@ -93,6 +124,35 @@ const BusinessResponses = () => {
                 setError('Geçersiz işletme ID. Lütfen DevTools sayfasını kullanarak geçerli bir işletme seçin.');
                 setLoading(false);
                 return;
+            }
+
+            // ANKET BAŞLIK HARİTASINI TEMİZLE - YENİDEN BAŞLAMA NOKTASI
+            // Her seferinde haritayı temizleyelim, böylece eski veriler karışmaz
+            Object.keys(surveyTitleMap).forEach(key => {
+                delete surveyTitleMap[key];
+            });
+            console.log('💥 Anket başlık haritası temizlendi - yeni yükleme başlıyor');
+
+            // ÖNEMLİ: ÖNCE TÜM İŞLETME ANKETLERİNİ GETİR VE HARİTAYA DOLDUR
+            console.log('📚 Önce TÜM işletme anketleri getiriliyor...');
+            try {
+                const allBusinessSurveys = await surveyService.getBusinessSurveys();
+                console.log(`✅ İşletmeye ait ${allBusinessSurveys.length} anket bulundu`);
+
+                // Tüm anket başlıklarını haritaya ekle
+                if (Array.isArray(allBusinessSurveys)) {
+                    allBusinessSurveys.forEach(survey => {
+                        if (survey && survey._id && survey.title) {
+                            surveyTitleMap[survey._id] = survey.title;
+                            console.log(`📝 Anket başlığı haritaya eklendi: ${survey._id} -> "${survey.title}"`);
+                        }
+                    });
+                }
+
+                console.log(`📊 Toplam ${Object.keys(surveyTitleMap).length} anket başlığı haritaya eklendi`);
+                console.log('📋 Anket başlık haritası:', surveyTitleMap);
+            } catch (err) {
+                console.error('❌ Anketleri getirirken hata:', err);
             }
 
             // ********** ÖNEMLİ FONKSİYONLAR **********
@@ -320,6 +380,48 @@ const BusinessResponses = () => {
                 console.log('===== TÜM API YANITLARI DETAYLI GÖRÜNÜM =====');
                 console.log(JSON.stringify(apiResponses, null, 2));
 
+                // ÖNCELİKLE TÜM YANITLARDA ANKET BAŞLIKLARINI DÜZELT
+                // Bu adım çok önemli - anket başlıklarını doğrudan güncelliyor
+                console.log("⚡ TÜM YANITLARDA BAŞLIK DÜZELTMESİ BAŞLIYOR");
+                if (Array.isArray(apiResponses)) {
+                    apiResponses.forEach((resp, idx) => {
+                        if (!resp || !resp.survey) return;
+
+                        console.log(`Yanıt #${idx + 1} için başlık kontrolü...`);
+                        const surveyId = resp.survey._id;
+                        const originalTitle = resp.survey.title || '';
+
+                        // Global haritadan başlığı al
+                        if (surveyId && surveyTitleMap[surveyId]) {
+                            // Eğer API yanıtındaki başlık zaten doğruysa değiştirme
+                            if (originalTitle === surveyTitleMap[surveyId]) {
+                                console.log(`✅ Başlık zaten doğru: "${originalTitle}"`);
+                            } else {
+                                // Başlık doğru değilse düzelt
+                                resp.survey.title = surveyTitleMap[surveyId];
+                                console.log(`🔄 Başlık düzeltildi: "${originalTitle}" -> "${resp.survey.title}"`);
+                            }
+                        } else {
+                            console.log(`⚠️ Anket ID ${surveyId || 'YOK'} için haritada başlık bulunamadı: "${originalTitle}"`);
+                        }
+                    });
+                }
+
+                // Tekrarlanan metni düzeltme yardımcı fonksiyonu
+                const fixRepeatedTitle = (title: string): string => {
+                    if (title && title.length >= 6) {
+                        const halfLength = Math.floor(title.length / 2);
+                        const firstHalf = title.substring(0, halfLength);
+                        const secondHalf = title.substring(halfLength);
+
+                        if (firstHalf === secondHalf) {
+                            console.log(`Tekrarlanan başlık düzeltildi: "${title}" -> "${firstHalf}"`);
+                            return firstHalf;
+                        }
+                    }
+                    return title;
+                };
+
                 // Soru ID'si -> metin eşleştirmelerini saklamak için ek bir harita oluştur
                 const questionTextMap: Record<string, string> = {};
 
@@ -328,6 +430,37 @@ const BusinessResponses = () => {
                     "681a3842c370f06545a7619e": "Hizmetimizden ne kadar memnun kaldınız?",
                     "681a3842c370f06545a7619f": "Personelimizin ilgisini nasıl değerlendirirsiniz?"
                 };
+
+                // YENİ: Önce tüm yanıtları doğru başlıklarla işaretleme
+                apiResponses.forEach(resp => {
+                    if (resp?.survey?._id && surveyTitleMap[resp.survey._id]) {
+                        // API yanıtına doğru başlığı doğrudan yerleştir
+                        resp.survey.title = surveyTitleMap[resp.survey._id];
+                        console.log(`API Yanıtında survey başlığı güncellendi: ${resp.survey._id} -> "${resp.survey.title}"`);
+                    }
+                });
+
+                // surveyData anket dizisi ise (işletme anketleri) veya tek bir anket nesnesi ise
+                // anket başlıklarını haritaya ekle
+                if (Array.isArray(surveyData)) {
+                    surveyData.forEach((survey: any) => {
+                        if (survey && survey._id && survey.title) {
+                            surveyTitleMap[survey._id] = survey.title;
+                            // Global haritaya da ekle
+                            console.log(`Anket başlığı haritaya eklendi: ${survey._id} -> "${survey.title}"`);
+                        }
+                    });
+                } else if (surveyData && surveyData._id && surveyData.title) {
+                    surveyTitleMap[surveyData._id] = surveyData.title;
+                    // Global haritaya da ekle
+                    console.log(`Tek anket başlığı haritaya eklendi: ${surveyData._id} -> "${surveyData.title}"`);
+                }
+
+                // YENİ: Anket başlık haritasının içeriğini kontrol et
+                console.log('Anket başlık haritası:', Object.keys(surveyTitleMap).length, 'adet başlık içeriyor');
+                Object.keys(surveyTitleMap).forEach(key => {
+                    console.log(`  - Anket: ${key} -> "${surveyTitleMap[key]}"`);
+                });
 
                 // Soru metinleri önce anket verisinden alınır, bulunamazsa sabit metinler kullanılır
                 if (surveyData && surveyData.questions && Array.isArray(surveyData.questions)) {
@@ -353,30 +486,55 @@ const BusinessResponses = () => {
                 console.log("==== TÜM API YANIT YAPISI DÖKÜMÜ ====");
                 if (apiResponses && apiResponses.length > 0) {
                     console.log(`Toplam ${apiResponses.length} yanıt inceleniyor`);
-                    apiResponses.forEach((resp, i) => {
-                        console.log(`--- Yanıt #${i + 1} ---`);
-                        console.log(`Ana alanlar: ${Object.keys(resp).join(', ')}`);
+                    console.log('API YANIT VERİSİ (İLK YANIT):', JSON.stringify(apiResponses[0], null, 2));
 
-                        // Müşteri ile ilgili alanları kontrol et
-                        const customerRelatedFields = ["customer", "user", "userId", "createdBy", "submittedBy", "respondent"];
-                        customerRelatedFields.forEach(field => {
-                            if (resp[field] !== undefined) {
-                                console.log(`${field} alanı mevcut:`, resp[field]);
+                    // Anket verisi detaylı inceleme
+                    console.log('🔍 ANKET VERİSİ DETAYLI İNCELEME:');
+                    console.log('Survey alanı:', apiResponses[0]?.survey);
+                    if (apiResponses[0]?.survey) {
+                        console.log('Survey ID:', apiResponses[0].survey._id);
+                        console.log('Survey Title:', apiResponses[0].survey.title);
+                        console.log('Survey Description:', apiResponses[0].survey.description);
+                    }
 
-                                // Object mi kontrol et
-                                if (typeof resp[field] === 'object' && resp[field] !== null) {
-                                    console.log(`${field} alanı özellikleri:`, Object.keys(resp[field]).join(', '));
-                                }
-                            }
-                        });
-                    });
+                    // Müşteri verisi var mı kontrol et
+                    console.log('Customer alanı:', apiResponses[0]?.customer);
+                    console.log('User alanı:', apiResponses[0]?.user);
+                    console.log('UserId alanı:', apiResponses[0]?.userId);
+                    console.log('SubmittedBy alanı:', apiResponses[0]?.submittedBy);
+
+                    // Tüm alanları listele
+                    console.log('Mevcut alanlar:', Object.keys(apiResponses[0] || {}));
                 }
 
                 return apiResponses.map((resp: any, index) => {
                     console.log(`İşlenen yanıt #${index + 1}:`, resp);
 
-                    // 1. Anket bilgisini hazırla
-                    const surveyInfo = resp.survey || surveyData || {};
+                    // Eksik anket ID'sini düzeltme girişimi - yanıt verilerinden bulma
+                    const extractedSurveyId =
+                        resp.survey?._id || // Direkt survey._id
+                        (resp.answers && resp.answers.length > 0 && resp.answers[0].questionId) || // Yanıtlardaki soru ID'sinden
+                        (resp.answers && resp.answers.length > 0 && resp.answers[0].question?._id) || // Yanıttaki soru nesnesinden
+                        (resp.answers && resp.answers.length > 0 && resp.answers[0].question) || ''; // Yanıttaki soru string ID'sinden
+
+                    // 1. Anket bilgisini hazırla - null kontrolü ekle
+                    const surveyInfo = resp?.survey || surveyData || {};
+
+                    // Eğer anket başlığında tekrarlama varsa düzelt
+                    if (resp.survey && resp.survey.title) {
+                        const originalTitle = resp.survey.title;
+                        resp.survey.title = fixRepeatedTitle(originalTitle);
+                        if (originalTitle !== resp.survey.title) {
+                            console.log('📝 Anket başlığı düzeltildi:', originalTitle, '->', resp.survey.title);
+                        }
+                    }
+
+                    // Anket bilgilerinin doğruluğunu kontrol et
+                    console.log('Anket Verisi İnceleme:', {
+                        respSurvey: resp?.survey || 'Yok',
+                        surveyData: surveyData || 'Yok',
+                        mergedSurvey: surveyInfo || 'Yok'
+                    });
 
                     // 2. BASİTLEŞTİRİLMİŞ MÜŞTERİ VERİSİ ALMA - DOĞRUDAN API'DEN GELEN BİLGİLERİ KULLAN
                     let finalCustomerName = '';  // Boş başlat, aşağıda kesinlikle dolduracağız
@@ -395,49 +553,6 @@ const BusinessResponses = () => {
                         // Apiden gelen tüm verileri düz string olarak birleştir ve içinde gerçek isim olabilecek şeyleri ara
                         let allDataString = JSON.stringify(apiData);
                         console.log('TÜM API VERİSİ:', allDataString);
-
-                        // API'den doğrudan name veya customerName verisi varsa kullan
-                        if (apiData.formData && apiData.formData.name === "dasda") {
-                            console.log('Özel durum tespit edildi: formData.name === "dasda"');
-                            return "dasda";
-                        }
-
-                        if (apiData.formData && apiData.formData.name === "deneme") {
-                            console.log('Özel durum tespit edildi: formData.name === "deneme"');
-                            return "deneme";
-                        }
-
-                        // API yanıtında adı açıkça belirtilmiş kullanıcılar
-                        const knownUsers: Record<string, string> = {
-                            "681a3c9270528f7108a89fed": "dasda",
-                            "681a3c69f5b03d7168f1a56c": "deneme"
-                        };
-
-                        // ID'yi kontrol et ve bilinen ID'ler için isim döndür
-                        if (apiData._id && typeof apiData._id === 'string' && knownUsers[apiData._id]) {
-                            console.log(`Bilinen kullanıcı ID'si: ${apiData._id} -> ${knownUsers[apiData._id]}`);
-                            return knownUsers[apiData._id];
-                        }
-
-                        if (apiData.customer && typeof apiData.customer === 'string' && knownUsers[apiData.customer]) {
-                            console.log(`Bilinen customer ID'si: ${apiData.customer} -> ${knownUsers[apiData.customer]}`);
-                            return knownUsers[apiData.customer];
-                        }
-
-                        if (apiData.user && typeof apiData.user === 'string' && knownUsers[apiData.user]) {
-                            console.log(`Bilinen user ID'si: ${apiData.user} -> ${knownUsers[apiData.user]}`);
-                            return knownUsers[apiData.user];
-                        }
-
-                        if (apiData.userId && typeof apiData.userId === 'string' && knownUsers[apiData.userId]) {
-                            console.log(`Bilinen userId: ${apiData.userId} -> ${knownUsers[apiData.userId]}`);
-                            return knownUsers[apiData.userId];
-                        }
-
-                        if (apiData.createdBy && typeof apiData.createdBy === 'string' && knownUsers[apiData.createdBy]) {
-                            console.log(`Bilinen createdBy ID'si: ${apiData.createdBy} -> ${knownUsers[apiData.createdBy]}`);
-                            return knownUsers[apiData.createdBy];
-                        }
 
                         // Doğrudan isim alanları
                         if (apiData.customerName && typeof apiData.customerName === 'string') {
@@ -534,8 +649,8 @@ const BusinessResponses = () => {
                         if (apiData.displayName && typeof apiData.displayName === 'string') return apiData.displayName;
                         if (apiData.username && typeof apiData.username === 'string') return apiData.username;
 
-                        console.log('Hiçbir kullanıcı adı bulunamadı, Anonim kullanılacak');
-                        return "Anonim";
+                        console.log('Hiçbir kullanıcı adı bulunamadı, İsimsiz Müşteri kullanılacak');
+                        return "İsimsiz Müşteri";
                     };
 
                     // API'den email bul
@@ -591,8 +706,8 @@ const BusinessResponses = () => {
 
                     // Eğer hiçbir şekilde isim bulunamadıysa
                     if (!finalCustomerName) {
-                        finalCustomerName = "Anonim";
-                        console.log("İsim bulunamadı, 'Anonim' kullanılıyor");
+                        finalCustomerName = "İsimsiz Müşteri";
+                        console.log("İsim bulunamadı, 'İsimsiz Müşteri' kullanılıyor");
                     }
 
                     // Email bilgisi için customerId'yi kullan
@@ -650,30 +765,60 @@ const BusinessResponses = () => {
                         };
                     }) : [];
 
-                    // Bilinen kullanıcı ID'lerini kontrol et ve doğrudan isimlerini göster
-                    if (customerId === "681a3c9270528f7108a89fed") {
-                        finalCustomerName = "dasda";
-                        console.log("Bilinen ID tespit edildi: 681a3c9270528f7108a89fed, isim 'dasda' olarak ayarlandı");
-                    } else if (customerId === "681a3c69f5b03d7168f1a56c") {
-                        finalCustomerName = "deneme";
-                        console.log("Bilinen ID tespit edildi: 681a3c69f5b03d7168f1a56c, isim 'deneme' olarak ayarlandı");
+                    // Müşteri veri işleme kodunu güncelleyelim
+                    // Tek bir yanıtı standardize et
+                    console.log(`${index + 1}. YANIT CUSTOMER DEĞER TİPİ:`, typeof resp.customer);
+                    console.log(`${index + 1}. YANIT CUSTOMER İÇERİĞİ:`, resp.customer);
+                    console.log(`${index + 1}. YANIT CUSTOMER NAME:`, resp.customer?.name);
+
+                    // API yanıtında survey nesnesi yoksa oluşturalım
+                    if (!resp.survey) {
+                        console.log('API yanıtında survey nesnesi yok, oluşturuluyor');
+                        resp.survey = {
+                            _id: surveyId || extractedSurveyId || '',
+                            title: '',  // Varsayılan değer olarak boş string kullan
+                            description: ''
+                        };
                     }
 
-                    return {
+                    // API'den gelen anket başlığını logla
+                    console.log('⭐ API YANITI ANKET BAŞLIĞI:', resp.survey?.title || 'Başlık yok');
+
+                    // StandardizeResponses dönüş değeri
+                    const standardizedResponse = {
                         _id: resp._id || resp.id || '',
                         survey: {
-                            _id: surveyInfo._id || '',
-                            title: surveyInfo.title || 'İsimsiz Anket',
-                            description: surveyInfo.description || ''
+                            _id: resp.survey?._id || surveyInfo?._id || '',
+                            // Anket başlığı öncelik sırası:
+                            // 1. Global haritamızdan başlık varsa onu kullan 
+                            // 2. Yoksa API'den gelen başlık (eğer Yanıt Formu değilse)
+                            // 3. Son çare olarak ID'den kısaltılmış bir başlık üret
+                            title: (resp.survey?._id && surveyTitleMap[resp.survey._id]) ?
+                                surveyTitleMap[resp.survey._id] :
+                                (resp.survey?.title && resp.survey.title !== 'Yanıt Formu' && resp.survey.title !== 'denemedeneme') ?
+                                    fixRepeatedTitle(resp.survey.title) :
+                                    (resp.survey?._id ? `Anket #${resp.survey._id.substring(0, 8)}` : 'Bilinmeyen Anket'),
+                            description: resp.survey?.description || surveyInfo?.description || ''
                         },
                         answers: processedAnswers,
-                        customer: {
+                        // Eğer apiden gelen bir customer nesnesi varsa, doğrudan onu kullan
+                        customer: typeof resp.customer === 'object' ? resp.customer : {
                             _id: customerId,
-                            name: finalCustomerName,  // Artık kesinlikle dolu
-                            email: finalCustomerEmail
+                            name: resp.customerName || finalCustomerName,
+                            email: resp.customerEmail || finalCustomerEmail
                         },
-                        createdAt: resp.createdAt || new Date().toISOString()
+                        // Geriye dönük uyumluluk için customerName ve customerEmail alanlarını da sakla
+                        customerName: resp.customerName || (resp.customer && typeof resp.customer === 'object' ? resp.customer.name : finalCustomerName),
+                        customerEmail: resp.customerEmail || (resp.customer && typeof resp.customer === 'object' ? resp.customer.email : finalCustomerEmail),
+                        createdAt: resp.createdAt || new Date().toISOString(),
+                        rewardPoints: resp.rewardPoints,
+                        pointsApproved: resp.pointsApproved
                     };
+
+                    console.log(`${index + 1}. YANIT STANDARDİZE EDİLMİŞ CUSTOMER:`, standardizedResponse.customer);
+                    console.log(`${index + 1}. YANIT STANDARDİZE EDİLMİŞ ANKET:`, standardizedResponse.survey);
+
+                    return standardizedResponse;
                 });
             };
 
@@ -687,6 +832,12 @@ const BusinessResponses = () => {
                 setSurvey(surveyData);
                 console.log('Anket verileri alındı:', surveyData);
 
+                // Anket başlığını haritaya ekle
+                if (surveyData && surveyData._id && surveyData.title) {
+                    surveyTitleMap[surveyData._id] = surveyData.title;
+                    console.log(`Anket başlığı haritaya eklendi: ${surveyData._id} -> "${surveyData.title}"`);
+                }
+
                 // Sonra yanıtları al
                 const apiResponses = await surveyService.getSurveyResponses(surveyId);
                 console.log('API anket yanıtları alındı:', apiResponses);
@@ -694,92 +845,104 @@ const BusinessResponses = () => {
                 // Yanıtları standarize et
                 responseData = standardizeResponses(apiResponses, surveyData);
             } else {
-                // Tüm işletme yanıtlarını al
+                // ÇOK ÖNEMLİ: Önce tüm işletme anketlerini al
+                console.log('Tüm işletme anketleri getiriliyor...');
+                const allBusinessSurveys = await surveyService.getBusinessSurveys();
+                console.log('İşletmenin tüm anketleri alındı:', allBusinessSurveys);
+
+                // Tüm anket başlıklarını haritaya ekle
+                if (Array.isArray(allBusinessSurveys)) {
+                    allBusinessSurveys.forEach(survey => {
+                        if (survey && survey._id && survey.title) {
+                            surveyTitleMap[survey._id] = survey.title;
+                            console.log(`Anket başlığı haritaya eklendi: ${survey._id} -> "${survey.title}"`);
+                        }
+                    });
+                }
+
+                // YENİ: Tüm anket ID'leri için haritada başlık olduğunu kontrol et
+                console.log('Anket başlık haritası:', Object.keys(surveyTitleMap).length, 'adet anket başlığı bulundu');
+
+                // Sonra işletme yanıtlarını al
                 const apiResponses = await surveyService.getBusinessResponses(userBusinessId);
-                console.log('API işletme yanıtları alındı:', apiResponses);
+                console.log('API işletme yanıtları alındı:', apiResponses.length, 'adet yanıt');
+
+                // ÖNEMLİ: API yanıtlarında anket başlıklarını doğrudan güncelleyelim
+                console.log("🔍 API YANITLARINDA BAŞLIK DÜZELTMESİ YAPILIYOR...");
+                if (Array.isArray(apiResponses)) {
+                    let başlıkDüzeltmeCount = 0;
+                    apiResponses.forEach(resp => {
+                        if (resp && resp.survey && resp.survey._id) {
+                            const surveyId = resp.survey._id;
+                            console.log(`Yanıt ID: ${resp._id || 'bilinmiyor'}, Survey ID: ${surveyId}`);
+                            console.log(`Orijinal başlık: "${resp.survey.title || 'Başlık yok'}"`);
+
+                            // 1. Eğer başlık boş veya Yanıt Formu ise
+                            if (!resp.survey.title || resp.survey.title === 'Yanıt Formu' || resp.survey.title === 'denemedeneme') {
+                                console.log('🔴 Yanıtta geçersiz başlık tespit edildi:', resp.survey.title);
+
+                                // Haritada başlık var mı?
+                                if (surveyTitleMap[surveyId]) {
+                                    resp.survey.title = surveyTitleMap[surveyId];
+                                    console.log(`🟢 Başlık düzeltildi: -> "${resp.survey.title}"`);
+                                    başlıkDüzeltmeCount++;
+                                } else {
+                                    console.log('⚠️ Haritada bu ID için başlık bulunamadı!');
+                                }
+                            } else {
+                                console.log('✅ Geçerli başlık var, değişiklik yok');
+                            }
+                        } else {
+                            console.log('⚠️ Bu yanıtta geçerli bir survey nesnesi yok!');
+                        }
+                    });
+                    console.log(`🔄 Toplam ${başlıkDüzeltmeCount} adet başlık düzeltildi`);
+                }
 
                 // İlk yanıtı detaylı incele
-                if (apiResponses && apiResponses.length > 0) {
+                if (Array.isArray(apiResponses) && apiResponses.length > 0) {
                     console.log('------ İLK YANIT DETAYLI İNCELEME ------');
                     console.log('Ham veri:', JSON.stringify(apiResponses[0], null, 2));
 
-                    // Müşteri verisi var mı kontrol et
-                    console.log('Customer alanı:', apiResponses[0].customer);
-                    console.log('User alanı:', apiResponses[0].user);
-                    console.log('UserId alanı:', apiResponses[0].userId);
-                    console.log('SubmittedBy alanı:', apiResponses[0].submittedBy);
+                    // Anket verisi detaylı inceleme
+                    console.log('🔍 ANKET VERİSİ DETAYLI İNCELEME:');
+                    console.log('Survey alanı:', apiResponses[0]?.survey);
+                    if (apiResponses[0]?.survey) {
+                        console.log('Survey ID:', apiResponses[0].survey._id);
+                        console.log('Survey Title:', apiResponses[0].survey.title);
+                        console.log('Survey Description:', apiResponses[0].survey.description);
+                    }
 
-                    // Tüm alanları listele
-                    console.log('Mevcut alanlar:', Object.keys(apiResponses[0]));
+                    // YENİ: Haritada bir başlık var mı kontrol et
+                    if (apiResponses[0]?.survey?._id) {
+                        const surveyId = apiResponses[0].survey._id;
+                        console.log(`Anket ID'si ${surveyId} için haritada başlık var mı:`, !!surveyTitleMap[surveyId]);
+                        if (surveyTitleMap[surveyId]) {
+                            console.log(`Haritada bulunan başlık: "${surveyTitleMap[surveyId]}"`);
+                        }
+                    }
                 }
 
                 // Tüm yanıtlara ait benzersiz anket ID'lerini bul
-                const uniqueSurveyIds = Array.from(new Set(
-                    apiResponses
-                        .filter(resp => resp.survey && resp.survey._id)
-                        .map(resp => resp.survey._id)
-                ));
+                const uniqueSurveyIds = Array.isArray(apiResponses)
+                    ? Array.from(new Set(
+                        apiResponses
+                            .filter(resp => resp && resp.survey && resp.survey._id)
+                            .map(resp => resp.survey._id)
+                    ))
+                    : [];
                 console.log('Benzersiz anket ID\'leri:', uniqueSurveyIds);
-
-                // Anket bilgilerini alma stratejisini değiştir
-                // getSurvey yerine getBusinessSurveys kullan - daha güvenilir
-                console.log('Tüm işletme anketleri getiriliyor...');
-                const allBusinessSurveys = await surveyService.getBusinessSurveys();
-                console.log('İşletmenin tüm anketleri:', allBusinessSurveys);
 
                 // Anket verisinin yapısını detaylı incele
                 if (allBusinessSurveys && allBusinessSurveys.length > 0) {
-                    const firstSurvey = allBusinessSurveys[0];
-                    console.log('İlk anket detayları:', JSON.stringify(firstSurvey, null, 2));
-
-                    // Anketin soruları var mı kontrol et
-                    if (firstSurvey.questions && Array.isArray(firstSurvey.questions)) {
-                        console.log('Anket soruları bulundu:', JSON.stringify(firstSurvey.questions, null, 2));
-                        console.log('İlk soru örneği:', JSON.stringify(firstSurvey.questions[0], null, 2));
-
-                        // API yanıtındaki soru ID'lerini kontrol et
-                        if (apiResponses && apiResponses.length > 0 && apiResponses[0].answers) {
-                            const firstQuestionId = apiResponses[0].answers[0].question;
-                            console.log('API yanıtındaki soru ID:', firstQuestionId);
-
-                            // Soruları ID'lerine göre eşleştir
-                            const matchingQuestion = firstSurvey.questions.find(
-                                (q: any) => q._id === firstQuestionId || q.id === firstQuestionId
-                            );
-
-                            if (matchingQuestion) {
-                                console.log('Eşleşen soru bulundu:', matchingQuestion);
-                            } else {
-                                console.log('ID\'ye göre eşleşen soru bulunamadı!');
-                            }
-                        }
-                    } else {
-                        console.log('Anket soru detayları bulunamadı. Anket yapısı:', Object.keys(firstSurvey));
-
-                        // API'den dönen yanıtın biçimini analiz etmek için
-                        // Mevcut yanıtı ve anket verilerini karşılaştır
-                        console.log('Yanıt ve anket verilerini karşılaştırma:');
-                        if (apiResponses && apiResponses.length > 0) {
-                            const sampleResponseSurvey = apiResponses[0].survey || {};
-                            const sampleQuestionIds = apiResponses[0].answers
-                                ? apiResponses[0].answers.map((a: any) => a.question)
-                                : [];
-
-                            console.log('Yanıttaki anket ID:', sampleResponseSurvey._id);
-                            console.log('Soru ID\'leri:', sampleQuestionIds);
-
-                            // Eşleşen anketi bul
-                            const matchingSurvey = allBusinessSurveys.find(
-                                (s: any) => s._id === sampleResponseSurvey._id
-                            );
-
-                            if (matchingSurvey) {
-                                console.log('Eşleşen anket bulundu:', matchingSurvey);
-                            } else {
-                                console.log('Eşleşen anket bulunamadı');
-                            }
-                        }
-                    }
+                    console.log('🔍 İŞLETME ANKETLERİ DETAYLI İNCELEME:');
+                    allBusinessSurveys.forEach((survey, index) => {
+                        console.log(`Anket #${index + 1}:`, {
+                            id: survey._id,
+                            title: survey.title,
+                            description: survey.description || 'Açıklama yok'
+                        });
+                    });
                 }
 
                 // Tüm anketleri bir map içinde sakla
@@ -795,19 +958,175 @@ const BusinessResponses = () => {
                 }
 
                 // Her yanıt için ilgili anket detayları kullanılarak standardizasyon yap
-                responseData = apiResponses.map(resp => {
-                    const surveyId = resp.survey && resp.survey._id;
-                    const surveyDetails = surveyId ? surveyDetailsMap[surveyId] : null;
+                responseData = Array.isArray(apiResponses)
+                    ? apiResponses.map((resp, index) => {
+                        // Güvenli null kontrolleri ekleyelim
+                        const surveyId = resp?.survey?._id;
 
-                    if (surveyDetails) {
-                        console.log(`Anket bulundu: ${surveyDetails.title}`);
-                    } else {
-                        console.log(`Anket bulunamadı: ${surveyId}`);
-                    }
+                        // YENİ: Eğer anket ID'si haritada varsa, başlığı doğrudan güncelle
+                        if (surveyId && surveyTitleMap[surveyId]) {
+                            // API yanıtındaki survey nesnesine doğru başlığı doğrudan yerleştir
+                            if (!resp.survey) {
+                                resp.survey = { _id: surveyId, title: '', description: '' };
+                            }
+                            // Haritadaki başlığı kullan - en önemli adım burada!
+                            resp.survey.title = surveyTitleMap[surveyId];
+                            console.log(`Survey başlığı haritadan enjekte edildi: ${surveyId} -> "${resp.survey.title}"`);
+                        }
 
-                    // Tek bir yanıtı standardize et
-                    return standardizeResponses([resp], surveyDetails)[0];
-                });
+                        // Eksik anket ID'sini düzeltme girişimi - yanıt verilerinden bulma
+                        const extractedSurveyId =
+                            resp.survey?._id || // Direkt survey._id
+                            (resp.answers && resp.answers.length > 0 && resp.answers[0].questionId) || // Yanıtlardaki soru ID'sinden
+                            (resp.answers && resp.answers.length > 0 && resp.answers[0].question?._id) || // Yanıttaki soru nesnesinden
+                            (resp.answers && resp.answers.length > 0 && resp.answers[0].question); // Yanıttaki soru string ID'sinden
+
+                        // Soru ID'sinden anket ID'si çıkarma - genellikle aynı prefixi paylaşırlar
+                        // Örn: 68274c5b5b7daef1b36b4151 (soru) -> 68274c5b5b7daef1b36b4150 (anket) olabilir
+                        const possibleSurveyId = extractedSurveyId?.substring(0, 20);
+
+                        console.log('Survey ID arama:', {
+                            direktId: surveyId,
+                            extractedId: extractedSurveyId,
+                            possibleId: possibleSurveyId
+                        });
+
+                        // Anket detaylarını haritadan bul - daha esnek eşleştirme algoritması
+                        let surveyDetails = null;
+
+                        // 1. Doğrudan ID eşleşmesi
+                        if (surveyId && surveyDetailsMap[surveyId]) {
+                            surveyDetails = surveyDetailsMap[surveyId];
+                            console.log(`✅ Direkt ID ile anket bulundu: "${surveyDetails.title}"`);
+                        }
+                        // 2. Çıkarılan ID ile eşleşme
+                        else if (extractedSurveyId && surveyDetailsMap[extractedSurveyId]) {
+                            surveyDetails = surveyDetailsMap[extractedSurveyId];
+                            console.log(`✅ Çıkarılan ID ile anket bulundu: "${surveyDetails.title}"`);
+                        }
+                        // 3. Partial ID eşleşmesi
+                        else {
+                            // Tüm anketleri dönerek partial ID eşleşmesi ara
+                            surveyDetails = Object.values(surveyDetailsMap).find(survey => {
+                                if (!survey || !survey._id) return false;
+
+                                // ID başlangıç eşleşmesi kontrol et
+                                if (possibleSurveyId && survey._id.startsWith(possibleSurveyId)) {
+                                    return true;
+                                }
+
+                                // Soru ID'leri ile eşleşmelerini kontrol et
+                                if (survey.questions && Array.isArray(survey.questions)) {
+                                    return survey.questions.some((q: any) => {
+                                        const qId = q._id || q.id;
+                                        return extractedSurveyId === qId ||
+                                            (extractedSurveyId && qId && qId.startsWith(extractedSurveyId.substring(0, 20)));
+                                    });
+                                }
+
+                                return false;
+                            });
+
+                            if (surveyDetails) {
+                                console.log(`✅ Genişletilmiş arama ile anket bulundu: "${surveyDetails.title}"`);
+                            }
+                        }
+
+                        // Bulunamazsa ve başka anketler varsa ilk anketi kullan
+                        if (!surveyDetails && allBusinessSurveys?.length > 0) {
+                            surveyDetails = allBusinessSurveys[0];
+                            console.log(`⚠️ Anket bulunamadı, ilk anket kullanılıyor: "${surveyDetails.title}"`);
+                        }
+
+                        if (surveyDetails) {
+                            console.log(`🎯 Yanıt için anket bulundu: "${surveyDetails.title}"`);
+                        }
+
+                        // Ham yanıt verilerini detaylı incele
+                        console.log('ANALİZ - Ham yanıt verisi:', resp);
+
+                        if (resp.survey) {
+                            console.log('ANALİZ - Survey verisi mevcut:', {
+                                surveyId: resp.survey._id,
+                                title: resp.survey.title,
+                                description: resp.survey.description
+                            });
+                        } else {
+                            console.log('ANALİZ - Survey verisi YOK!');
+                        }
+
+                        // ÇOK ÖNEMLİ: 
+                        // Eğer bu yanıt gerçekten bir ankete aitse, 
+                        // ama anket bilgisi yoksa veya eksikse:
+                        // Survey ID'yi anketten doğrudan alıyoruz
+                        if (!resp.survey || !resp.survey.title) {
+                            // Tüm anketleri tarayarak ID'ye göre eşleşme ara
+                            const matchingSurvey = allBusinessSurveys.find((survey: any) => {
+                                return survey._id === surveyId || survey._id === extractedSurveyId;
+                            });
+
+                            if (matchingSurvey) {
+                                console.log('✅ Tam ID eşleşmesi ile anket bulundu:', matchingSurvey.title);
+
+                                // Anket bilgisini API yanıtına direkt ekliyoruz
+                                resp.survey = {
+                                    _id: matchingSurvey._id,
+                                    title: matchingSurvey.title || '',
+                                    description: matchingSurvey.description || ''
+                                };
+                            }
+                            else {
+                                // Kısmi ID eşleşmesi
+                                for (const survey of allBusinessSurveys) {
+                                    // Güvenli tip kontrolü
+                                    if (!survey || !survey._id || !extractedSurveyId) continue;
+
+                                    const surveyIdStr = String(survey._id);
+                                    const extractedIdStr = String(extractedSurveyId);
+
+                                    if (surveyIdStr.startsWith(extractedIdStr.substring(0, 16))) {
+                                        console.log('✅ Kısmi ID eşleşmesi ile anket bulundu:', survey.title);
+                                        resp.survey = {
+                                            _id: survey._id,
+                                            title: survey.title || '',
+                                            description: survey.description || ''
+                                        };
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        // API yanıtında survey nesnesi yoksa oluşturalım ama başlık olarak boş string kullan
+                        if (!resp.survey) {
+                            console.log('API yanıtında survey nesnesi yok, oluşturuluyor');
+                            resp.survey = {
+                                _id: surveyId || extractedSurveyId || '',
+                                title: '',  // Varsayılan değer olarak boş string kullan
+                                description: ''
+                            };
+                        }
+
+                        // API'den gelen anket başlığını logla
+                        console.log('⭐ API YANITI ANKET BAŞLIĞI:', resp.survey?.title || 'Başlık yok');
+
+                        // Eğer haritada bu anket için başlık varsa ve şu anki başlık boş veya Yanıt Formu ise, haritadan al
+                        if (resp.survey._id && surveyTitleMap[resp.survey._id] &&
+                            (!resp.survey.title || resp.survey.title === 'Yanıt Formu')) {
+                            resp.survey.title = surveyTitleMap[resp.survey._id];
+                            console.log(`Anket başlığı haritadan enjekte edildi: ${resp.survey._id} -> "${resp.survey.title}"`);
+                        }
+
+                        // Tek bir yanıtı standardize et
+                        const standardizedResp = standardizeResponses([resp], surveyDetails)[0];
+                        console.log('Standardize edilmiş yanıt:', standardizedResp);
+
+                        // Standardize edilmiş yanıt içindeki anket başlığını kontrol et ve logla
+                        console.log('📋 Standardize edilmiş anket başlığı:', standardizedResp.survey?.title || 'Başlık yok');
+
+                        return standardizedResp;
+                    })
+                    : [];
             }
 
             setResponses(responseData);
@@ -825,6 +1144,302 @@ const BusinessResponses = () => {
         fetchResponses();
     }, [fetchResponses]);
 
+    // Puan onaylama/reddetme dialogunu aç
+    const handleOpenApproveDialog = (response: ResponseData) => {
+        setSelectedResponse(response);
+        setApprovedPoints(response.rewardPoints || 0);
+        setOpenApproveDialog(true);
+    };
+
+    // Dialogu kapat
+    const handleCloseApproveDialog = () => {
+        setSelectedResponse(null);
+        setOpenApproveDialog(false);
+        setApprovedPoints(0);
+    };
+
+    // Puanları onayla
+    const handleApprovePoints = async () => {
+        if (!selectedResponse) return;
+
+        try {
+            console.log('🔍 Puan onaylama işlemi başlatılıyor - Yanıt ID:', selectedResponse._id);
+            console.log('Onaylanacak puan değeri:', approvedPoints);
+
+            setOperationLoading(true);
+
+            // API isteği göndermeden önce debug
+            console.log('API çağrısı URL:', `/surveys/responses/${selectedResponse._id}/approve-points`);
+            console.log('API çağrısı veri:', { approvedPoints });
+
+            try {
+                const response = await apiService.patch(`/surveys/responses/${selectedResponse._id}/approve-points`, {
+                    approvedPoints
+                });
+
+                console.log('✅ API yanıtı alındı:', response.data);
+
+                if (response.data && response.data.success) {
+                    // İşlem başarılı, onaylayan ve tarih bilgilerini göster
+                    const approvedByName = response.data.data.approvedBy || 'Sistem';
+                    const approvedDate = new Date(response.data.data.approvedAt).toLocaleString('tr-TR');
+
+                    setSuccessMessage(`Puanlar başarıyla onaylandı. Onaylayan: ${approvedByName}, Tarih: ${approvedDate}`);
+                    fetchResponses(); // Yanıtları yeniden yükle
+                    handleCloseApproveDialog();
+                } else {
+                    const errorMsg = response.data?.message || 'Puanlar onaylanırken beklenmeyen bir yanıt alındı';
+                    console.error('❌ API başarılı ancak işlem başarısız:', errorMsg);
+                    setError(errorMsg);
+                }
+            } catch (apiError: any) {
+                console.error('❌ API çağrısı sırasında hata:', apiError);
+                console.error('Hata detayları:', {
+                    message: apiError.message,
+                    status: apiError.response?.status,
+                    statusText: apiError.response?.statusText,
+                    responseData: apiError.response?.data,
+                });
+
+                // Status 500 için daha anlamlı hata mesajları
+                if (apiError.response?.status === 500) {
+                    setError('Sunucu hatası: İşlem sırasında beklenmeyen bir hata oluştu. Lütfen daha sonra tekrar deneyin.');
+                } else {
+                    setError(apiError.response?.data?.message || apiError.message || 'Puanlar onaylanırken bir hata oluştu');
+                }
+            }
+        } catch (err: any) {
+            console.error('❌ Genel puan onaylama hatası:', err);
+            setError(err.message || 'Puanlar onaylanırken bir hata oluştu');
+        } finally {
+            setOperationLoading(false);
+        }
+    };
+
+    // Puanları reddet
+    const handleRejectPoints = async () => {
+        if (!selectedResponse) return;
+
+        try {
+            console.log('🔍 Puan reddetme işlemi başlatılıyor - Yanıt ID:', selectedResponse._id);
+
+            setOperationLoading(true);
+
+            // API isteği göndermeden önce debug
+            console.log('API çağrısı URL:', `/surveys/responses/${selectedResponse._id}/reject-points`);
+
+            // API çağrısı için veri hazırla
+            const rejectData = {
+                responseId: selectedResponse._id,
+                confirmed: true
+            };
+
+            console.log('🔧 API PATCH isteği başlatılıyor:', `/surveys/responses/${selectedResponse._id}/reject-points`);
+            console.log('PATCH Verileri:', rejectData);
+
+            try {
+                const response = await apiService.patch(`/surveys/responses/${selectedResponse._id}/reject-points`, rejectData);
+
+                console.log('✅ API yanıtı alındı:', response.data);
+
+                if (response.data && response.data.success) {
+                    // İşlem başarılı, reddeden ve tarih bilgilerini göster
+                    const rejectedByName = response.data.data.rejectedBy || 'Sistem';
+                    const rejectedDate = new Date(response.data.data.rejectedAt).toLocaleString('tr-TR');
+
+                    setSuccessMessage(`Puanlar başarıyla reddedildi. Reddeden: ${rejectedByName}, Tarih: ${rejectedDate}`);
+                    fetchResponses(); // Yanıtları yeniden yükle
+                    handleCloseApproveDialog();
+                } else {
+                    const errorMsg = response.data?.message || 'Puanlar reddedilirken beklenmeyen bir yanıt alındı';
+                    console.error('❌ API başarılı ancak işlem başarısız:', errorMsg);
+                    setError(errorMsg);
+                }
+            } catch (apiError: any) {
+                console.error('❌ API çağrısı sırasında hata:', apiError);
+                console.error('Hata detayları:', {
+                    message: apiError.message,
+                    status: apiError.response?.status,
+                    statusText: apiError.response?.statusText,
+                    responseData: apiError.response?.data,
+                    requestData: rejectData
+                });
+
+                // Status 500 için daha anlamlı hata mesajları
+                if (apiError.response?.status === 500) {
+                    setError('Sunucu hatası: İşlem sırasında beklenmeyen bir hata oluştu. Lütfen daha sonra tekrar deneyin.');
+                } else if (apiError.response?.status === 400) {
+                    setError(`Hata: ${apiError.response?.data?.message || 'Geçersiz istek formatı'}. Lütfen tekrar deneyin.`);
+                } else {
+                    setError(apiError.response?.data?.message || apiError.message || 'Puanlar reddedilirken bir hata oluştu');
+                }
+            }
+        } catch (err: any) {
+            console.error('❌ Genel puan reddetme hatası:', err);
+            setError(err.message || 'Puanlar reddedilirken bir hata oluştu');
+        } finally {
+            setOperationLoading(false);
+        }
+    };
+
+    // Yanıt silme onay dialogunu aç
+    const handleOpenDeleteDialog = (response: ResponseData) => {
+        setSelectedResponse(response);
+        setOpenDeleteDialog(true);
+    };
+
+    // Yanıt silme dialogunu kapat
+    const handleCloseDeleteDialog = () => {
+        setSelectedResponse(null);
+        setOpenDeleteDialog(false);
+    };
+
+    // Yanıtı sil
+    const handleDeleteResponse = async () => {
+        if (!selectedResponse) return;
+
+        try {
+            console.log('🗑️ Yanıt silme işlemi başlatılıyor - Yanıt ID:', selectedResponse._id);
+
+            setOperationLoading(true);
+
+            // API isteği göndermeden önce debug
+            console.log('API çağrısı URL:', `/surveys/responses/${selectedResponse._id}`);
+
+            try {
+                const response = await apiService.delete(`/surveys/responses/${selectedResponse._id}`);
+
+                console.log('✅ API yanıtı alındı:', response.data);
+
+                if (response.data && response.data.success) {
+                    // İşlem başarılı, silen kişi ve tarih bilgilerini göster
+                    const deletedByName = response.data.data.deletedBy || 'Sistem';
+                    const deletedDate = new Date(response.data.data.deletedAt).toLocaleString('tr-TR');
+
+                    setSuccessMessage(`Yanıt başarıyla silindi. Silen: ${deletedByName}, Tarih: ${deletedDate}`);
+                    fetchResponses(); // Yanıtları yeniden yükle
+                    handleCloseDeleteDialog();
+                } else {
+                    const errorMsg = response.data?.message || 'Yanıt silinirken beklenmeyen bir yanıt alındı';
+                    console.error('❌ API başarılı ancak işlem başarısız:', errorMsg);
+                    setError(errorMsg);
+                }
+            } catch (apiError: any) {
+                console.error('❌ API çağrısı sırasında hata:', apiError);
+                console.error('Hata detayları:', {
+                    message: apiError.message,
+                    status: apiError.response?.status,
+                    statusText: apiError.response?.statusText,
+                    responseData: apiError.response?.data
+                });
+
+                if (apiError.response?.status === 403) {
+                    setError('Hata: Bu yanıtı silme yetkiniz bulunmamaktadır.');
+                } else if (apiError.response?.status === 404) {
+                    setError('Hata: Yanıt bulunamadı. Muhtemelen daha önce silinmiş olabilir.');
+                } else if (apiError.response?.status === 500) {
+                    setError('Sunucu hatası: İşlem sırasında beklenmeyen bir hata oluştu. Lütfen daha sonra tekrar deneyin.');
+                } else {
+                    setError(apiError.response?.data?.message || apiError.message || 'Yanıt silinirken bir hata oluştu');
+                }
+            }
+        } catch (err: any) {
+            console.error('❌ Genel yanıt silme hatası:', err);
+            setError(err.message || 'Yanıt silinirken bir hata oluştu');
+        } finally {
+            setOperationLoading(false);
+        }
+    };
+
+    // Başarı ve hata mesajlarını kapat
+    const handleCloseAlert = () => {
+        setSuccessMessage(null);
+        setError('');
+    };
+
+    // İşlenmiş API yanıtlarını tabloda göstermede müşteri bilgilerini kullanma
+    const renderCustomerCell = (response: ResponseData) => {
+        // Debug log
+        console.log('🧑 Müşteri hücresi oluşturuluyor, yanıt ID:', response._id);
+        console.log('🧑 Customer verisi:', response.customer);
+        console.log('🧑 userId verisi:', response.userId);
+        console.log('🧑 customerName değeri:', response.customerName);
+
+        // Müşteri adı için önceliklendirme stratejisi
+        let displayName = '';
+        let displayEmail = '';
+        let displayDetails = '';
+        let displayColor = 'text.secondary';
+
+        // 1. En yüksek öncelik: userId nesnesi (populate edilmiş kullanıcı)
+        if (response.userId && typeof response.userId === 'object' && response.userId.name) {
+            displayName = response.userId.name;
+            displayEmail = response.userId.email || '';
+            displayDetails = 'Kayıtlı kullanıcı';
+            displayColor = 'success.main';
+            console.log('✅ Populate edilmiş kullanıcı bilgisi kullanıldı:', displayName);
+        }
+        // 2. Öncelik: customer nesnesi (response.customer)
+        else if (response.customer && typeof response.customer === 'object' && response.customer.name) {
+            displayName = response.customer.name;
+            displayEmail = response.customer.email || '';
+
+            // Sadece anonim müşteri olup olmadığını kontrol et
+            if (!displayName.includes('Anonim')) {
+                displayDetails = 'Kayıtlı müşteri';
+                displayColor = 'info.main';
+            } else {
+                displayDetails = 'Ziyaretçi';
+                displayColor = 'text.secondary';
+            }
+
+            console.log('✅ Müşteri nesnesi (customer) verisi kullanıldı:', displayName);
+        }
+        // 3. Öncelik: customerName alanı (geriye dönük uyumluluk için)
+        else if (response.customerName && response.customerName.trim()) {
+            displayName = response.customerName;
+            displayEmail = response.customerEmail || '';
+
+            if (!displayName.includes('Anonim')) {
+                displayDetails = 'Form bilgisi';
+                displayColor = 'text.primary';
+            } else {
+                displayDetails = 'Ziyaretçi';
+                displayColor = 'text.secondary';
+            }
+
+            console.log('✅ customerName verisi kullanıldı:', displayName);
+        }
+        // Hiçbir bilgi bulunamazsa
+        else {
+            displayName = 'İsimsiz Müşteri';
+            displayDetails = 'Bilgi yok';
+            console.log('⚠️ Herhangi bir müşteri bilgisi bulunamadı');
+        }
+
+        // Son durumda hangi müşteri bilgisinin kullanıldığını logla
+        console.log(`🧑 Son müşteri bilgisi: isim=${displayName}, detay=${displayDetails}`);
+
+        return (
+            <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                <Typography variant="body1" component="div" fontWeight="medium">
+                    {displayName}
+                </Typography>
+                {displayEmail && (
+                    <Typography variant="caption" color="text.secondary">
+                        {displayEmail}
+                    </Typography>
+                )}
+                <Typography variant="caption" sx={{
+                    fontStyle: displayDetails === 'Bilgi yok' ? 'italic' : 'normal',
+                    color: displayColor
+                }}>
+                    {displayDetails}
+                </Typography>
+            </Box>
+        );
+    };
+
     if (loading) {
         return (
             <Box display="flex" justifyContent="center" alignItems="center" minHeight="300px">
@@ -836,12 +1451,20 @@ const BusinessResponses = () => {
     return (
         <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
             <Typography variant="h4" gutterBottom>
-                {surveyId ? `'${survey?.title || 'Anket'}' için Yanıtlar` : 'Tüm Anket Yanıtları'}
+                {surveyId ?
+                    (survey && survey.title ? `'${survey.title}' için Yanıtlar` : 'Ankete Ait Yanıtlar')
+                    : 'Tüm Anket Yanıtları'}
             </Typography>
 
             {error && (
-                <Alert severity="error" sx={{ mb: 3 }}>
+                <Alert severity="error" sx={{ mb: 3 }} onClose={handleCloseAlert}>
                     {error}
+                </Alert>
+            )}
+
+            {successMessage && (
+                <Alert severity="success" sx={{ mb: 3 }} onClose={handleCloseAlert}>
+                    {successMessage}
                 </Alert>
             )}
 
@@ -872,6 +1495,8 @@ const BusinessResponses = () => {
                                     {!surveyId && <TableCell>Anket</TableCell>}
                                     <TableCell>Müşteri</TableCell>
                                     <TableCell>Yanıtlar</TableCell>
+                                    <TableCell align="center">Ödül Puanları</TableCell>
+                                    <TableCell align="center">İşlemler</TableCell>
                                 </TableRow>
                             </TableHead>
                             <TableBody>
@@ -882,37 +1507,40 @@ const BusinessResponses = () => {
                                         </TableCell>
                                         {!surveyId && (
                                             <TableCell>
-                                                {response.survey?.title || 'İsimsiz Anket'}
+                                                <Typography
+                                                    variant="body1"
+                                                    style={{
+                                                        color: '#1976d2',
+                                                        fontWeight: 700,
+                                                        fontSize: '16px',
+                                                        borderBottom: '2px solid #1976d2',
+                                                        display: 'inline-block',
+                                                        paddingBottom: '2px'
+                                                    }}
+                                                >
+                                                    {response.survey?._id && surveyTitleMap[response.survey._id] ? (
+                                                        <>{surveyTitleMap[response.survey._id]}</>
+                                                    ) : response.survey?.title && response.survey.title !== 'Yanıt Formu' && response.survey.title !== 'denemedeneme' ? (
+                                                        <>{response.survey.title}</>
+                                                    ) : (
+                                                        <span style={{ color: '#f44336' }}>Anket {response.survey?._id ? `#${response.survey._id.substring(0, 8)}` : 'bilgisi bulunamadı'}</span>
+                                                    )}
+                                                </Typography>
+                                                {response.survey?.description && (
+                                                    <Typography variant="caption" color="text.secondary">
+                                                        {response.survey.description.length > 40
+                                                            ? `${response.survey.description.substring(0, 40)}...`
+                                                            : response.survey.description}
+                                                    </Typography>
+                                                )}
+                                                {/* Anket ID'sini debug için göster */}
+                                                <Typography variant="caption" color="text.disabled" sx={{ display: 'block', fontSize: '9px', mt: 1 }}>
+                                                    ID: {response.survey?._id || 'Yok'}
+                                                </Typography>
                                             </TableCell>
                                         )}
                                         <TableCell>
-                                            {response.customer ? (
-                                                <Box>
-                                                    <Typography
-                                                        variant="body2"
-                                                        fontWeight={
-                                                            isMongoId(response.customer.name) ?
-                                                                'normal' : 'bold'
-                                                        }
-                                                        color={
-                                                            isMongoId(response.customer.name) ?
-                                                                'text.secondary' : 'inherit'
-                                                        }
-                                                    >
-                                                        {isMongoId(response.customer.name) ?
-                                                            (response.customer._id === "681a3c9270528f7108a89fed" ? "dasda" :
-                                                                (response.customer._id === "681a3c69f5b03d7168f1a56c" ? "deneme" : "Anonim"))
-                                                            : response.customer.name}
-                                                    </Typography>
-                                                    {response.customer.email && (
-                                                        <Typography variant="body2" color="text.secondary">
-                                                            {response.customer.email}
-                                                        </Typography>
-                                                    )}
-                                                </Box>
-                                            ) : (
-                                                <Typography color="text.secondary">Müşteri Bilgisi Yok</Typography>
-                                            )}
+                                            {renderCustomerCell(response)}
                                         </TableCell>
                                         <TableCell>
                                             <Card variant="outlined">
@@ -934,6 +1562,50 @@ const BusinessResponses = () => {
                                                 </CardContent>
                                             </Card>
                                         </TableCell>
+                                        <TableCell align="center">
+                                            {response.pointsApproved === true ? (
+                                                <Chip
+                                                    icon={<EmojiEventsIcon />}
+                                                    label={`${response.rewardPoints || 0} Puan (Onaylandı)`}
+                                                    color="success"
+                                                    variant="outlined"
+                                                />
+                                            ) : response.pointsApproved === false ? (
+                                                <Chip
+                                                    icon={<CancelIcon />}
+                                                    label="Reddedildi"
+                                                    color="error"
+                                                    variant="outlined"
+                                                />
+                                            ) : (
+                                                <Chip
+                                                    icon={<EmojiEventsIcon />}
+                                                    label={`${response.rewardPoints || 0} Puan (Bekliyor)`}
+                                                    color="warning"
+                                                    variant="outlined"
+                                                />
+                                            )}
+                                        </TableCell>
+                                        <TableCell align="center">
+                                            {response.pointsApproved !== true && response.pointsApproved !== false && (
+                                                <Tooltip title="Puanları Yönet">
+                                                    <IconButton
+                                                        color="primary"
+                                                        onClick={() => handleOpenApproveDialog(response)}
+                                                    >
+                                                        <CheckCircleIcon />
+                                                    </IconButton>
+                                                </Tooltip>
+                                            )}
+                                            <Tooltip title="Yanıtı Sil">
+                                                <IconButton
+                                                    color="error"
+                                                    onClick={() => handleOpenDeleteDialog(response)}
+                                                >
+                                                    <DeleteIcon />
+                                                </IconButton>
+                                            </Tooltip>
+                                        </TableCell>
                                     </TableRow>
                                 ))}
                             </TableBody>
@@ -941,6 +1613,96 @@ const BusinessResponses = () => {
                     </TableContainer>
                 </>
             )}
+
+            {/* Puan Onaylama Dialog */}
+            <Dialog open={openApproveDialog} onClose={handleCloseApproveDialog}>
+                <DialogTitle>Ödül Puanlarını Yönet</DialogTitle>
+                <DialogContent>
+                    {selectedResponse && (
+                        <>
+                            <DialogContentText sx={{ mb: 2 }}>
+                                <b>
+                                    {selectedResponse.customer?.name ||
+                                        selectedResponse.customerName ||
+                                        'İsimsiz Müşteri'}
+                                </b>
+                                {' adlı müşterinin '}
+                                <b>{selectedResponse.survey?.title || ''}</b>
+                                {' anketine yanıtı için ödül puanlarını yönetin.'}
+                            </DialogContentText>
+
+                            <Box sx={{ mb: 3, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
+                                <Typography variant="subtitle2" color="textSecondary" gutterBottom>
+                                    Müşteri Bilgileri:
+                                </Typography>
+                                <Typography variant="body2">
+                                    <b>Ad:</b> {selectedResponse.customer?.name ||
+                                        selectedResponse.customerName ||
+                                        'İsimsiz Müşteri'}
+                                </Typography>
+                                {(selectedResponse.customer?.email || selectedResponse.customerEmail) && (
+                                    <Typography variant="body2">
+                                        <b>E-posta:</b> {selectedResponse.customer?.email ||
+                                            selectedResponse.customerEmail}
+                                    </Typography>
+                                )}
+                            </Box>
+                        </>
+                    )}
+
+                    <Typography variant="subtitle2" gutterBottom sx={{ mt: 2 }}>
+                        Onaylanacak Puan:
+                    </Typography>
+                    <TextField
+                        fullWidth
+                        label="Puan"
+                        type="number"
+                        value={approvedPoints}
+                        onChange={(e) => setApprovedPoints(Math.max(0, parseInt(e.target.value) || 0))}
+                        InputProps={{
+                            startAdornment: <EmojiEventsIcon sx={{ mr: 1, color: 'gray' }} />,
+                        }}
+                    />
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={handleCloseApproveDialog}>İptal</Button>
+                    <Button
+                        onClick={handleRejectPoints}
+                        color="error"
+                        disabled={operationLoading}
+                    >
+                        {operationLoading ? <CircularProgress size={24} /> : "Reddet"}
+                    </Button>
+                    <Button
+                        onClick={handleApprovePoints}
+                        variant="contained"
+                        color="success"
+                        disabled={operationLoading || approvedPoints <= 0}
+                    >
+                        {operationLoading ? <CircularProgress size={24} /> : "Onayla"}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            {/* Yanıt Silme Dialog */}
+            <Dialog open={openDeleteDialog} onClose={handleCloseDeleteDialog}>
+                <DialogTitle>Yanıtı Sil</DialogTitle>
+                <DialogContent>
+                    <DialogContentText>
+                        Bu yanıtı silmek istediğinize emin misiniz? Bu işlem geri dönülemez.
+                    </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={handleCloseDeleteDialog}>İptal</Button>
+                    <Button
+                        onClick={handleDeleteResponse}
+                        color="error"
+                        disabled={operationLoading}
+                    >
+                        {operationLoading ? <CircularProgress size={24} /> : "Sil"}
+                    </Button>
+                </DialogActions>
+            </Dialog>
         </Container>
     );
 };

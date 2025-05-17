@@ -9,6 +9,8 @@ export interface IUser extends mongoose.Document {
     role: UserRole;
     isActive: boolean;
     business?: mongoose.Types.ObjectId;
+    points: number;
+    completedSurveys: mongoose.Types.ObjectId[];
     createdAt: Date;
     updatedAt: Date;
     comparePassword(candidatePassword: string): Promise<boolean>;
@@ -50,7 +52,15 @@ const userSchema = new mongoose.Schema<IUser>(
         business: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Business'
-        }
+        },
+        points: {
+            type: Number,
+            default: 0
+        },
+        completedSurveys: [{
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Survey'
+        }]
     },
     {
         timestamps: true

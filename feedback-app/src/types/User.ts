@@ -7,6 +7,7 @@ export interface User {
     role: UserRole;
     isActive: boolean;
     business?: string | null;
+    points?: number;
     createdAt: Date;
     updatedAt: Date;
     needsBusinessConfig?: boolean;

@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
 import apiService from '../services/api';
+import { surveyService } from '../services/surveyService';
 import { Rating } from 'react-native-ratings';
 import { AuthContext, AuthContextType } from '../context/AuthContext';
 
@@ -52,6 +53,7 @@ const SurveyFormScreen: React.FC<Props> = ({ navigation, route }) => {
     const [answers, setAnswers] = useState<Answer[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isCompleted, setIsCompleted] = useState(false);
+    const [isExistingResponse, setIsExistingResponse] = useState(false);
 
     const { surveyId, code } = route.params;
 
@@ -64,24 +66,26 @@ const SurveyFormScreen: React.FC<Props> = ({ navigation, route }) => {
             setIsLoading(true);
             setError('');
 
-            if (!auth.userRole) {
-                throw new Error('Kullanıcı rolü bulunamadı');
-            }
-
             let surveyData;
             if (code) {
                 // QR kodundan anket yükleme
                 const response = await apiService.surveys.getByCode(code);
+                if (!response.success) {
+                    throw new Error(response.error || 'Anket bulunamadı');
+                }
                 surveyData = response.data;
             } else if (surveyId) {
                 // Survey ID'den anket yükleme
-                const response = await apiService.surveys.getById(surveyId, auth.userRole);
+                const response = await apiService.surveys.getById(surveyId, auth.userRole || 'CUSTOMER');
+                if (!response.success) {
+                    throw new Error(response.error || 'Anket bulunamadı');
+                }
                 surveyData = response.data;
             } else {
                 throw new Error('Anket bilgisi bulunamadı');
             }
 
-            if (!surveyData.questions || !Array.isArray(surveyData.questions) || surveyData.questions.length === 0) {
+            if (!surveyData || !surveyData.questions || !Array.isArray(surveyData.questions) || surveyData.questions.length === 0) {
                 throw new Error('Anket soruları bulunamadı');
             }
 
@@ -94,10 +98,9 @@ const SurveyFormScreen: React.FC<Props> = ({ navigation, route }) => {
             }));
 
             setAnswers(initialAnswers);
-
-        } catch (err: any) {
-            console.error('Anket yükleme hatası:', err);
-            setError(err.message || 'Anket yüklenirken bir hata oluştu');
+        } catch (error: any) {
+            console.error('Anket yükleme hatası:', error);
+            setError(error.message || 'Anket yüklenirken bir hata oluştu');
         } finally {
             setIsLoading(false);
         }
@@ -148,32 +151,39 @@ const SurveyFormScreen: React.FC<Props> = ({ navigation, route }) => {
         try {
             setIsSubmitting(true);
 
-            // Cevapları formatla
+            // Cevapları doğru formatta hazırla
             const formattedAnswers = answers.map(answer => ({
                 questionId: answer.questionId,
                 value: answer.value
             }));
 
-            // Cevapları gönder
-            await apiService.surveys.submitResponse(survey._id, {
-                surveyId: survey._id,
-                answers: formattedAnswers,
-                code: code
-            });
+            console.log("Gönderilecek cevaplar:", formattedAnswers);
 
-            // Başarılı
+            // Kullanıcı bilgilerini ekleme
+            const customerInfo = auth.userInfo ? {
+                name: auth.userInfo.name || '',
+                email: auth.userInfo.email || ''
+            } : null;
+
+            // Anket yanıtını gönder
+            const response = await apiService.submitSurveyResponse(survey._id,
+                formattedAnswers,
+                customerInfo
+            );
+
+            console.log("API yanıtı:", response);
+
+            // Önceki yanıt kontrolü
+            if (response.data && response.data.isExistingResponse) {
+                setIsExistingResponse(true);
+            }
+
             setIsCompleted(true);
-
-            // 2 saniye sonra ana sayfaya dön
-            setTimeout(() => {
-                navigation.navigate('Home');
-            }, 2000);
-
-        } catch (err: any) {
-            console.error('Cevap gönderme hatası:', err);
+        } catch (error: any) {
+            console.error("Anket gönderme hatası:", error);
             Alert.alert(
                 "Hata",
-                err.message || "Cevaplar gönderilirken bir hata oluştu",
+                error.message || "Anket yanıtınız gönderilirken bir hata oluştu.",
                 [{ text: "Tamam" }]
             );
         } finally {
@@ -277,9 +287,30 @@ const SurveyFormScreen: React.FC<Props> = ({ navigation, route }) => {
     if (isCompleted) {
         return (
             <View style={styles.completedContainer}>
-                <Ionicons name="checkmark-circle" size={100} color="#2ecc71" />
-                <Text style={styles.completedTitle}>Teşekkürler!</Text>
-                <Text style={styles.completedText}>Anket cevaplarınız başarıyla kaydedildi.</Text>
+                <Ionicons
+                    name={isExistingResponse ? "information-circle" : "checkmark-circle"}
+                    size={100}
+                    color={isExistingResponse ? "#3498db" : "#2ecc71"}
+                />
+                <Text style={styles.completedTitle}>
+                    {isExistingResponse ? "Önceki Yanıtınız" : "Teşekkürler!"}
+                </Text>
+                <Text style={styles.completedText}>
+                    {isExistingResponse
+                        ? "Bu ankete daha önce yanıt verdiniz. Önceki yanıtınız sistemde kayıtlıdır."
+                        : "Anket cevaplarınız başarıyla kaydedildi."}
+                </Text>
+                {auth.userInfo && (
+                    <Text style={styles.completedUserInfo}>
+                        <Text style={{ fontWeight: 'bold' }}>{auth.userInfo.name}</Text> olarak yanıtınız veritabanına kaydedildi.
+                    </Text>
+                )}
+                <TouchableOpacity
+                    style={styles.homeButton}
+                    onPress={() => navigation.navigate('Home')}
+                >
+                    <Text style={styles.homeButtonText}>Ana Sayfaya Dön</Text>
+                </TouchableOpacity>
             </View>
         );
     }
@@ -525,6 +556,28 @@ const styles = StyleSheet.create({
         fontSize: 16,
         color: '#7f8c8d',
         textAlign: 'center',
+    },
+    completedUserInfo: {
+        fontSize: 16,
+        color: '#34495e',
+        textAlign: 'center',
+        marginTop: 16,
+        backgroundColor: '#ecf0f1',
+        padding: 10,
+        borderRadius: 8,
+        width: '90%',
+    },
+    homeButton: {
+        backgroundColor: '#3498db',
+        paddingVertical: 12,
+        paddingHorizontal: 24,
+        borderRadius: 8,
+        marginTop: 16,
+    },
+    homeButtonText: {
+        color: 'white',
+        fontSize: 16,
+        fontWeight: 'bold',
     },
 });
 

@@ -54,6 +54,7 @@ interface QuestionData {
 
 interface AnswerFormData {
     questionId: string;
+    question?: string; // Backend için gerekli
     value: string | number | boolean;
 }
 
@@ -159,12 +160,35 @@ const PublicSurveyForm: React.FC<PublicSurveyFormProps> = ({ survey, onSubmit, i
     const handleSubmitForm = (e: React.FormEvent): void => {
         e.preventDefault();
 
-        const formattedAnswers: AnswerFormData[] = Object.keys(answers).map(questionId => ({
-            questionId,
-            value: answers[questionId]
-        }));
+        // Make sure there's at least one answer
+        if (Object.keys(answers).length === 0) {
+            alert('Lütfen en az bir soruyu cevaplayınız');
+            return;
+        }
 
-        onSubmit(formattedAnswers);
+        try {
+            const formattedAnswers: AnswerFormData[] = Object.keys(answers).map(questionId => ({
+                questionId,
+                question: questionId, // Hem question hem questionId alanını ekle
+                value: answers[questionId]
+            }));
+
+            // Tüm zorunlu soruların yanıtlandığından emin ol
+            const unansweredRequired = survey.questions
+                .filter(q => q.required && !Object.prototype.hasOwnProperty.call(answers, q._id))
+                .map(q => q.text);
+
+            if (unansweredRequired.length > 0) {
+                alert(`Lütfen aşağıdaki zorunlu soruları cevaplayınız:\n${unansweredRequired.join('\n')}`);
+                return;
+            }
+
+            console.log('Gönderilecek yanıtlar:', formattedAnswers);
+            onSubmit(formattedAnswers);
+        } catch (error) {
+            console.error('Form hazırlanırken hata oluştu:', error);
+            alert('Form gönderilirken bir hata oluştu. Lütfen tekrar deneyin.');
+        }
     };
 
     if (!survey) return null;

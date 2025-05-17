@@ -6,8 +6,13 @@ interface SurveyResponse {
     surveyId: string;
     answers: {
         questionId: string;
-        answer: string | string[];
+        value: string | number | string[];
     }[];
+    code?: string;
+    customer?: {
+        name: string;
+        email: string;
+    };
 }
 
 export const surveyService = {
@@ -89,6 +94,8 @@ export const surveyService = {
             // Kullanıcı rolünü kontrol et
             const userStr = await AsyncStorage.getItem('user');
             const user = userStr ? JSON.parse(userStr) : null;
+            const userInfoStr = await AsyncStorage.getItem('userInfo');
+            const userInfo = userInfoStr ? JSON.parse(userInfoStr) : null;
 
             if (!user) {
                 throw new Error('Kullanıcı bilgisi bulunamadı');
@@ -98,9 +105,30 @@ export const surveyService = {
                 throw new Error('Sadece müşteriler anket yanıtlayabilir');
             }
 
+            // Kullanıcı bilgilerini otomatik ekle
+            if (userInfo && !surveyResponse.customer) {
+                surveyResponse.customer = {
+                    name: userInfo.name || user.name || '',
+                    email: userInfo.email || user.email || ''
+                };
+            }
+
+            // Backend'e gönderilecek veri formatını hazırla
+            const formattedData = {
+                survey: surveyResponse.surveyId,
+                answers: surveyResponse.answers.map(answer => ({
+                    question: answer.questionId, // Backend "question" istiyor "questionId" değil
+                    value: answer.value
+                })),
+                customer: surveyResponse.customer
+            };
+
+            console.log('Gönderilecek veri:', JSON.stringify(formattedData, null, 2));
+
             const response = await api.submitSurveyResponse(
                 surveyResponse.surveyId,
-                surveyResponse.answers
+                formattedData.answers,
+                surveyResponse.customer
             );
 
             // Yanıt başarılı ise puan ver

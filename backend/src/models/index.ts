@@ -1,10 +1,11 @@
 import User from './User';
 import Business from './Business';
 import Survey from './Survey';
-import Response from './Response';
+import { Response } from './Response';
 import { Reward } from './Reward';
 import QRCode from './QRCode';
 import Feedback from './Feedback';
+import { Log } from './Log';
 
 export {
     User,
@@ -13,5 +14,6 @@ export {
     Response,
     Reward,
     QRCode,
-    Feedback
+    Feedback,
+    Log
 }; 

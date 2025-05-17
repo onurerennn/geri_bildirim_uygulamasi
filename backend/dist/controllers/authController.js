@@ -45,12 +45,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createSuperAdmin = exports.getUserProfile = exports.getMe = exports.logout = exports.login = exports.register = void 0;
+exports.getBusinessCustomers = exports.createSuperAdmin = exports.getUserProfile = exports.getMe = exports.logout = exports.login = exports.register = void 0;
 const bcrypt = __importStar(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const User_1 = __importDefault(require("../models/User"));
 const UserRole_1 = require("../types/UserRole");
 const Business_1 = __importDefault(require("../models/Business"));
+const Response_1 = __importDefault(require("../models/Response"));
 // Token oluşturma fonksiyonu
 const generateToken = (id) => {
     return jsonwebtoken_1.default.sign({ id }, process.env.JWT_SECRET || 'gizlianahtar', {
@@ -148,7 +149,10 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         // Gerekli alanların kontrolü
         if (!email || !password) {
             console.error('GİRİŞ HATASI: Email veya şifre eksik');
-            return res.status(400).json({ message: 'Email ve şifre alanları zorunludur' });
+            return res.status(400).json({
+                success: false,
+                message: 'Email ve şifre alanları zorunludur'
+            });
         }
         try {
             // 1. Önce normal kullanıcı olarak giriş dene
@@ -200,18 +204,65 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                     const token = jsonwebtoken_1.default.sign({ id: user._id }, process.env.JWT_SECRET || 'default_secret', { expiresIn: '30d' });
                     // Şifreyi response'dan kaldır
                     const userData = user.toJSON();
+                    // BUSINESS_ADMIN rolü için işletme kontrol et
+                    if (user.role === UserRole_1.UserRole.BUSINESS_ADMIN && !user.business) {
+                        console.log('BUSINESS_ADMIN kullanıcısının işletme bilgisi yok, varsayılan işletme aranıyor...');
+                        try {
+                            // Sistemdeki ilk aktif işletmeyi bul
+                            const defaultBusiness = yield Business_1.default.findOne({ isActive: true });
+                            if (defaultBusiness) {
+                                console.log('Varsayılan işletme bulundu, kullanıcıya atanıyor:', defaultBusiness._id);
+                                // Kullanıcıya işletme ID'sini ata ve kaydet
+                                user.business = defaultBusiness._id;
+                                yield User_1.default.findByIdAndUpdate(user._id, { business: defaultBusiness._id });
+                                // userData objesini de güncelle
+                                userData.business = defaultBusiness._id;
+                                console.log('Kullanıcıya işletme atandı:', {
+                                    userId: user._id,
+                                    businessId: defaultBusiness._id,
+                                    businessName: defaultBusiness.name
+                                });
+                            }
+                            else {
+                                console.warn('Varsayılan işletme bulunamadı.');
+                            }
+                        }
+                        catch (businessError) {
+                            console.error('İşletme atama hatası:', businessError);
+                        }
+                    }
+                    // Kullanıcının rolüne göre izin kontrolü
+                    if (user.role === UserRole_1.UserRole.CUSTOMER) {
+                        console.log('MÜŞTERİ GİRİŞİ BAŞARILI');
+                    }
+                    else if (user.role === UserRole_1.UserRole.BUSINESS_ADMIN) {
+                        console.log('İŞLETME ADMİN GİRİŞİ BAŞARILI');
+                    }
+                    else if (user.role === UserRole_1.UserRole.SUPER_ADMIN) {
+                        console.log('SÜPER ADMİN GİRİŞİ BAŞARILI');
+                    }
                     // Giriş başarılı
                     console.log('GİRİŞ BAŞARILI. Kullanıcı:', {
                         id: user._id,
                         email: user.email,
-                        role: user.role
+                        role: user.role,
+                        business: user.business || 'Yok'
                     });
                     console.log('---------------------------------------');
-                    return res.json({
+                    // Yanıt nesnesini daha güvenli hale getir
+                    const safeResponse = {
                         success: true,
                         token,
-                        data: userData
-                    });
+                        data: {
+                            _id: userData._id.toString(),
+                            name: userData.name,
+                            email: userData.email,
+                            role: userData.role,
+                            business: userData.business ? userData.business.toString() : null,
+                            isActive: userData.isActive
+                        }
+                    };
+                    return res.status(200).json(safeResponse);
                 }
                 else {
                     console.error('GİRİŞ HATASI: Şifre yanlış');
@@ -249,11 +300,20 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                             business: business._id
                         });
                         console.log('---------------------------------------');
-                        return res.json({
+                        // Yanıt nesnesini güvenli hale getir
+                        const safeResponse = {
                             success: true,
                             token,
-                            data: adminData
-                        });
+                            data: {
+                                _id: adminData._id.toString(),
+                                name: adminData.name,
+                                email: adminData.email,
+                                role: adminData.role,
+                                business: adminData.business ? adminData.business.toString() : null,
+                                isActive: adminData.isActive
+                            }
+                        };
+                        return res.status(200).json(safeResponse);
                     }
                     else {
                         console.log('Admin hesabı bulunamadı, otomatik oluşturuluyor...');
@@ -282,11 +342,20 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                             business: business._id
                         });
                         console.log('---------------------------------------');
-                        return res.json({
+                        // Yanıt nesnesini güvenli hale getir
+                        const safeResponse = {
                             success: true,
                             token,
-                            data: adminData
-                        });
+                            data: {
+                                _id: adminData._id.toString(),
+                                name: adminData.name,
+                                email: adminData.email,
+                                role: adminData.role,
+                                business: adminData.business ? adminData.business.toString() : null,
+                                isActive: adminData.isActive
+                            }
+                        };
+                        return res.status(200).json(safeResponse);
                     }
                 }
                 else {
@@ -307,14 +376,18 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         catch (innerError) {
             console.error('Giriş işlemi hatası (iç):', innerError.message);
             console.error('Stack:', innerError.stack);
-            throw innerError;
+            return res.status(500).json({
+                success: false,
+                message: 'Giriş işlemi sırasında bir hata oluştu',
+                error: innerError.message
+            });
         }
     }
     catch (error) {
         console.error('Giriş işlemi hatası (dış):', error.message);
         console.error('Stack:', error.stack);
         console.log('---------------------------------------');
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: 'Giriş işlemi sırasında bir hata oluştu',
             error: error.message
@@ -466,3 +539,86 @@ const createSuperAdmin = (req, res) => __awaiter(void 0, void 0, void 0, functio
     }
 });
 exports.createSuperAdmin = createSuperAdmin;
+// @desc    İşletmeye ait müşterileri getir
+// @route   GET /api/users/business/:businessId/customers
+// @access  Private - Business Admin
+const getBusinessCustomers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { businessId } = req.params;
+        console.log(`İşletme ID: ${businessId} için müşterileri getirme isteği`);
+        // İşletme mevcut mu kontrol et
+        const business = yield Business_1.default.findById(businessId);
+        if (!business) {
+            console.error(`İşletme bulunamadı: ${businessId}`);
+            return res.status(404).json({
+                success: false,
+                message: 'İşletme bulunamadı'
+            });
+        }
+        console.log(`İşletme bulundu: ${business.name}`);
+        // Önce işletmeye ait yanıtları bul
+        const responses = yield Response_1.default.find({ business: businessId })
+            .populate({
+            path: 'survey',
+            select: 'title description rewardPoints'
+        })
+            .sort({ createdAt: -1 });
+        console.log(`${responses.length} adet yanıt bulundu`);
+        // Müşteri bilgilerini toplamak için bir map oluştur
+        const customerMap = new Map();
+        // Her yanıtı işle ve müşteri bilgilerini topla
+        responses.forEach(response => {
+            var _a;
+            // Customer bilgilerini çıkar (nesne veya ID olabilir)
+            let customerId = '';
+            let customerName = '';
+            let customerEmail = '';
+            // 1. Durum: response.customer bir nesne
+            if (response.customer && typeof response.customer === 'object') {
+                customerName = response.customer.name || response.customerName || 'İsimsiz Müşteri';
+                customerEmail = response.customer.email || response.customerEmail || '';
+                customerId = response.customer._id || response.customer.email || customerName;
+            }
+            // 2. Durum: Yanıttaki diğer alanlar
+            else {
+                customerName = response.customerName || 'İsimsiz Müşteri';
+                customerEmail = response.customerEmail || '';
+                customerId = ((_a = response.userId) === null || _a === void 0 ? void 0 : _a.toString()) || customerEmail || customerName;
+            }
+            // Benzersiz müşteri anahtarı oluştur (ID, email veya isim)
+            const customerKey = customerId || customerEmail || customerName;
+            if (!customerKey)
+                return; // Geçersiz müşteri, atla
+            // Müşteri haritada yoksa ekle, varsa bilgilerini güncelle
+            if (!customerMap.has(customerKey)) {
+                customerMap.set(customerKey, {
+                    _id: customerId,
+                    name: customerName,
+                    email: customerEmail,
+                    points: response.rewardPoints || 0,
+                    completedSurveys: 1
+                });
+            }
+            else {
+                const customer = customerMap.get(customerKey);
+                customerMap.set(customerKey, Object.assign(Object.assign({}, customer), { points: customer.points + (response.rewardPoints || 0), completedSurveys: customer.completedSurveys + 1 }));
+            }
+        });
+        console.log(`${customerMap.size} eşsiz müşteri bulundu`);
+        // Müşteri haritasını diziye dönüştür
+        const customers = Array.from(customerMap.values());
+        return res.status(200).json({
+            success: true,
+            data: customers
+        });
+    }
+    catch (error) {
+        console.error('İşletme müşterilerini getirme hatası:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Müşteri listesi getirilirken bir hata oluştu',
+            error: error.message
+        });
+    }
+});
+exports.getBusinessCustomers = getBusinessCustomers;

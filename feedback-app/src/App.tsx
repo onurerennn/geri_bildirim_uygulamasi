@@ -26,6 +26,8 @@ import PublicSurveyPage from './pages/PublicSurveyPage';
 import SurveyDetails from './pages/SurveyDetails';
 import EditSurvey from './pages/EditSurvey';
 import BusinessResponses from './pages/BusinessResponses';
+import BusinessAnalytics from './pages/BusinessAnalytics';
+import CustomerPoints from './pages/business/CustomerPoints';
 
 // Korumalı rotalar için bileşen
 const ProtectedRoute = ({
@@ -313,7 +315,16 @@ const AppRoutes = () => {
           path="/business/analytics"
           element={
             <ProtectedRoute allowedRoles={[UserRole.BUSINESS_ADMIN]}>
-              <Dashboard />
+              <BusinessAnalytics />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/business/customerpoints"
+          element={
+            <ProtectedRoute allowedRoles={[UserRole.BUSINESS_ADMIN]}>
+              <CustomerPoints />
             </ProtectedRoute>
           }
         />

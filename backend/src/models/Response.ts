@@ -1,60 +1,79 @@
-import mongoose, { Schema, Document, ObjectId } from 'mongoose';
-
-export interface IAnswer {
-    question: ObjectId;
-    value: string | number;
-}
+import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IResponse extends Document {
-    survey: ObjectId;
-    answers: IAnswer[];
-    customer?: ObjectId;
-    business: ObjectId;
+    survey: mongoose.Types.ObjectId;
+    business: mongoose.Types.ObjectId;
+    customer: mongoose.Types.ObjectId | any; // Müşteri ID'si veya müşteri bilgi nesnesi olabilir
+    userId: mongoose.Types.ObjectId; // Response.userId, gönderen kullanıcıyı temsil eder
+    customerName?: string; // Müşteri adı
+    customerEmail?: string; // Müşteri e-postası
+    answers: Array<{
+        question: mongoose.Types.ObjectId | string;
+        value: string | number;
+    }>;
+    rewardPoints?: number; // Kazanılan ödül puanları
+    pointsApproved?: boolean; // Puan onay durumu
+    approvedBy?: mongoose.Types.ObjectId; // Puanları onaylayan kullanıcı
+    approvedAt?: Date; // Onay tarihi
+    rejectedBy?: mongoose.Types.ObjectId; // Puanları reddeden kullanıcı
+    rejectedAt?: Date; // Red tarihi
     createdAt: Date;
     updatedAt: Date;
 }
 
-const AnswerSchema = new Schema({
-    question: {
-        type: Schema.Types.ObjectId,
-        ref: 'Survey.questions',
-        required: true
-    },
-    value: {
-        type: Schema.Types.Mixed,
-        required: true
-    }
-});
-
-const ResponseSchema = new Schema({
+const ResponseSchema: Schema = new Schema({
     survey: {
         type: Schema.Types.ObjectId,
         ref: 'Survey',
         required: true
     },
-    answers: {
-        type: [AnswerSchema],
-        required: true,
-        validate: {
-            validator: function (answers: IAnswer[]) {
-                return answers.length > 0;
-            },
-            message: 'A response must have at least one answer'
-        }
-    },
-    customer: {
-        type: Schema.Types.ObjectId,
-        ref: 'User',
-        required: false
-    },
     business: {
         type: Schema.Types.ObjectId,
         ref: 'Business',
         required: true
-    }
-}, { timestamps: true });
+    },
+    customer: {
+        type: Schema.Types.Mixed, // String (ObjectId) veya nesne olabilir
+        ref: 'User'
+    },
+    userId: {
+        type: Schema.Types.ObjectId,
+        ref: 'User'
+    },
+    customerName: String,
+    customerEmail: String,
+    answers: [{
+        question: {
+            type: Schema.Types.Mixed, // String (ObjectId) veya düz metin olabilir
+            required: true
+        },
+        value: {
+            type: Schema.Types.Mixed,
+            required: true
+        }
+    }],
+    rewardPoints: {
+        type: Number,
+        default: 0
+    },
+    pointsApproved: {
+        type: Boolean,
+        default: null
+    },
+    approvedBy: {
+        type: Schema.Types.ObjectId,
+        ref: 'User'
+    },
+    approvedAt: Date,
+    rejectedBy: {
+        type: Schema.Types.ObjectId,
+        ref: 'User'
+    },
+    rejectedAt: Date
+}, {
+    timestamps: true
+});
 
-// Yanıtların benzersiz olmasını sağla (bir kullanıcı bir ankete bir kez yanıt verebilir)
-ResponseSchema.index({ survey: 1, customer: 1 }, { unique: true, sparse: true });
+export const Response = mongoose.model<IResponse>('Response', ResponseSchema);
 
-export default mongoose.model<IResponse>('Response', ResponseSchema); 
+export default Response; 

@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView, ActivityIndicator } from 'react-native';
 // @ts-ignore
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthContext } from '../context/AuthContext';
@@ -7,31 +7,78 @@ import { useAuthContext } from '../context/AuthContext';
 import { CommonActions } from '@react-navigation/native';
 // @ts-ignore
 import { StackNavigationProp } from '@react-navigation/stack';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import api from '../services/api';
 
 interface ProfileScreenProps {
     navigation: StackNavigationProp<any>;
 }
 
+interface UserInfo {
+    name: string;
+    email: string;
+    role?: string;
+    createdAt?: string;
+}
+
 const ProfileScreen = ({ navigation }: ProfileScreenProps) => {
-    // Auth context'ten kullanıcı bilgileri ve çıkış fonksiyonunu al
-    const { user, logout } = useAuthContext();
+    const { userRole, token, logout } = useAuthContext();
+    const [userInfo, setUserInfo] = useState<UserInfo>({ name: 'Yükleniyor...', email: 'Yükleniyor...' });
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        fetchUserProfile();
+    }, []);
+
+    const fetchUserProfile = async () => {
+        try {
+            setIsLoading(true);
+            setError(null);
+
+            // API'den kullanıcı bilgilerini al
+            const response = await api.getUserProfile();
+
+            if (response.success && response.data) {
+                setUserInfo({
+                    name: response.data.name || 'İsimsiz Kullanıcı',
+                    email: response.data.email,
+                    role: response.data.role,
+                    createdAt: response.data.createdAt
+                });
+
+                // Bilgileri AsyncStorage'a da kaydet
+                await AsyncStorage.setItem('userInfo', JSON.stringify(response.data));
+            } else {
+                throw new Error('Kullanıcı bilgileri alınamadı');
+            }
+        } catch (error) {
+            console.error('Profil bilgileri yükleme hatası:', error);
+            setError('Profil bilgileri yüklenirken bir hata oluştu');
+
+            // Hata durumunda cached bilgileri kullan
+            const cachedInfo = await AsyncStorage.getItem('userInfo');
+            if (cachedInfo) {
+                setUserInfo(JSON.parse(cachedInfo));
+            }
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     // Güvenli e-posta görüntüleme fonksiyonu
     const getSafeEmail = () => {
-        if (!user) return 'kullanici@ornek.com';
-        return user.email || 'kullanici@ornek.com';
+        return userInfo.email || 'kullanici@ornek.com';
     };
 
     // Güvenli isim görüntüleme fonksiyonu
     const getSafeName = () => {
-        if (!user) return 'Kullanıcı';
-        return user.name || 'Kullanıcı';
+        return userInfo.name || 'Kullanıcı';
     };
 
     // Güvenli avatar harfi alma
     const getAvatarLetter = () => {
-        if (!user || !user.name) return '?';
-        return user.name.charAt(0).toUpperCase();
+        return userInfo.name ? userInfo.name.charAt(0).toUpperCase() : '?';
     };
 
     // Çıkış onayını göster
@@ -46,15 +93,20 @@ const ProfileScreen = ({ navigation }: ProfileScreenProps) => {
                 },
                 {
                     text: 'Çıkış Yap',
-                    onPress: () => {
-                        logout(() => {
+                    onPress: async () => {
+                        try {
+                            await AsyncStorage.removeItem('userInfo');
+                            await logout();
                             navigation.dispatch(
                                 CommonActions.reset({
                                     index: 0,
                                     routes: [{ name: 'Login' }]
                                 })
                             );
-                        });
+                        } catch (error) {
+                            console.error('Çıkış yapma hatası:', error);
+                            Alert.alert('Hata', 'Çıkış yapılırken bir hata oluştu.');
+                        }
                     },
                     style: 'destructive',
                 },
@@ -62,8 +114,29 @@ const ProfileScreen = ({ navigation }: ProfileScreenProps) => {
         );
     };
 
+    if (isLoading) {
+        return (
+            <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#3498db" />
+                <Text style={styles.loadingText}>Profil bilgileri yükleniyor...</Text>
+            </View>
+        );
+    }
+
     return (
         <ScrollView style={styles.container}>
+            {error && (
+                <View style={styles.errorContainer}>
+                    <Text style={styles.errorText}>{error}</Text>
+                    <TouchableOpacity
+                        style={styles.retryButton}
+                        onPress={fetchUserProfile}
+                    >
+                        <Text style={styles.retryButtonText}>Tekrar Dene</Text>
+                    </TouchableOpacity>
+                </View>
+            )}
+
             <View style={styles.header}>
                 <View style={styles.avatarContainer}>
                     <Text style={styles.avatarText}>
@@ -72,6 +145,16 @@ const ProfileScreen = ({ navigation }: ProfileScreenProps) => {
                 </View>
                 <Text style={styles.name}>{getSafeName()}</Text>
                 <Text style={styles.email}>{getSafeEmail()}</Text>
+                {userInfo.role && (
+                    <View style={styles.roleContainer}>
+                        <Text style={styles.roleText}>
+                            {userInfo.role === 'CUSTOMER' ? 'Müşteri' :
+                                userInfo.role === 'BUSINESS_ADMIN' ? 'İşletme Yöneticisi' :
+                                    userInfo.role === 'SUPER_ADMIN' ? 'Sistem Yöneticisi' :
+                                        'Kullanıcı'}
+                        </Text>
+                    </View>
+                )}
             </View>
 
             <View style={styles.section}>
@@ -217,6 +300,52 @@ const styles = StyleSheet.create({
         fontSize: 12,
         marginTop: 20,
         marginBottom: 30,
+    },
+    loadingContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#f5f5f5',
+    },
+    loadingText: {
+        marginTop: 10,
+        color: '#666',
+        fontSize: 16,
+    },
+    errorContainer: {
+        backgroundColor: '#ffebee',
+        padding: 15,
+        margin: 10,
+        borderRadius: 8,
+        alignItems: 'center',
+    },
+    errorText: {
+        color: '#d32f2f',
+        fontSize: 14,
+        marginBottom: 10,
+    },
+    retryButton: {
+        backgroundColor: '#d32f2f',
+        paddingHorizontal: 20,
+        paddingVertical: 8,
+        borderRadius: 5,
+    },
+    retryButtonText: {
+        color: 'white',
+        fontSize: 14,
+        fontWeight: '500',
+    },
+    roleContainer: {
+        backgroundColor: '#e3f2fd',
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+        borderRadius: 15,
+        marginTop: 5,
+    },
+    roleText: {
+        color: '#1976d2',
+        fontSize: 12,
+        fontWeight: '500',
     },
 });
 

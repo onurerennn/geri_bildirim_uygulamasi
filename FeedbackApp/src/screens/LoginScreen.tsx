@@ -57,66 +57,41 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation, route }) => {
     };
 
     const handleLogin = async () => {
-        // Boş alan kontrolü
-        if (!email || !password) {
-            setErrorMessage('Lütfen tüm alanları doldurun');
-            return;
-        }
-
-        setIsLoading(true);
-        setErrorMessage('');
-
         try {
-            // Email adresini kontrol et ve küçük harfe çevirerek gönderelim
-            const normalizedEmail = email ? email.toLowerCase().trim() : '';
-            if (!normalizedEmail) {
-                setErrorMessage('Geçerli bir e-posta adresi giriniz.');
-                setIsLoading(false);
+            // Form validasyonu
+            if (!email || !password) {
+                setErrorMessage('Lütfen tüm alanları doldurun');
                 return;
             }
 
-            const result = await api.login(normalizedEmail, password);
-            console.log('Giriş sonucu:', result);
+            setIsLoading(true);
+            setErrorMessage('');
+
+            // Login isteği
+            const result = await api.login(email, password);
 
             if (result.success && result.token && result.data) {
                 console.log('Giriş başarılı! Kullanıcı:', result.data);
                 console.log('Kullanıcı rolü:', result.data.role);
 
                 // Auth context'i güncelle
-                await auth.login(result.token, result.data.role);
+                await auth.login(
+                    result.token,
+                    result.data.role,
+                    {
+                        name: result.data.name || 'Kullanıcı',
+                        email: result.data.email || 'kullanici@ornek.com'
+                    }
+                );
 
-                // Kullanıcı rolüne göre yönlendirme
-                switch (result.data.role) {
-                    case 'SUPER_ADMIN':
-                        navigation.reset({
-                            index: 0,
-                            routes: [{ name: 'AdminTabs' }],
-                        });
-                        break;
-                    case 'BUSINESS_ADMIN':
-                        navigation.reset({
-                            index: 0,
-                            routes: [{ name: 'BusinessAdminTabs' }],
-                        });
-                        break;
-                    case 'CUSTOMER':
-                        navigation.reset({
-                            index: 0,
-                            routes: [{ name: 'CustomerTabs' }],
-                        });
-                        break;
-                    default:
-                        console.warn('Bilinmeyen kullanıcı rolü:', result.data.role);
-                        // Varsayılan olarak müşteri tab'ına yönlendir
-                        navigation.reset({
-                            index: 0,
-                            routes: [{ name: 'CustomerTabs' }],
-                        });
-                }
+                // Ana navigasyona yönlendir
+                navigation.reset({
+                    index: 0,
+                    routes: [{ name: 'Main' }],
+                });
             } else {
-                // Giriş başarısız
-                console.log('Giriş başarısız:', result.error);
-                setErrorMessage(result.error || 'Giriş yapılamadı. Kullanıcı adı veya şifre hatalı.');
+                // API'den gelen hata mesajını göster
+                setErrorMessage(result.error || 'Giriş yapılamadı');
             }
         } catch (error: any) {
             console.error('Login hatası:', error);

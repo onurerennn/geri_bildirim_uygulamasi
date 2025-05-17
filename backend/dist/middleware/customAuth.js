@@ -1,6 +1,22 @@
 "use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.flexibleRoleCheck = exports.debugRoleCheck = exports.checkBusinessAdminOrSuperAdmin = void 0;
+exports.lightAuth = exports.flexibleRoleCheck = exports.debugRoleCheck = exports.checkBusinessAdminOrSuperAdmin = void 0;
+const mongoose_1 = __importDefault(require("mongoose"));
+const UserRole_1 = require("../types/UserRole");
+const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const User_1 = __importDefault(require("../models/User"));
 /**
  * İşletme admini veya super admin kontrolü yapan middleware
  * Kullanıcı rolünü büyük-küçük harf duyarsız şekilde kontrol eder
@@ -21,8 +37,18 @@ const checkBusinessAdminOrSuperAdmin = (req, res, next) => {
     // BUSINESS_ADMIN rolünde ve business atanmamışsa, otomatik business ata
     if (String(req.user.role).toUpperCase().includes('BUSINESS_ADMIN') && !req.user.business) {
         console.log('⚠️ İşletme yöneticisine işletme atanmamış, otomatik oluşturuluyor');
-        // Kullanıcı ID'sine dayalı bir business ID oluştur
-        req.user.business = `business_${req.user.id}`;
+        // Kullanıcı ID'sine dayalı bir business ID oluştur - 'undefined' sorununu gidermek için kontrol ekle
+        if (req.user.id && req.user.id !== 'undefined') {
+            req.user.business = `business_${req.user.id}`;
+        }
+        else if (req.user._id && req.user._id !== 'undefined') {
+            req.user.business = `business_${req.user._id}`;
+        }
+        else {
+            // Güvenli bir fallback mekanizması
+            const tempId = new mongoose_1.default.Types.ObjectId().toString();
+            req.user.business = `business_${tempId}`;
+        }
         console.log('✅ Otomatik işletme ID oluşturuldu:', req.user.business);
     }
     // Rol kontrolü (case-insensitive)
@@ -33,6 +59,14 @@ const checkBusinessAdminOrSuperAdmin = (req, res, next) => {
     // BUSINESS_ADMIN, SUPER_ADMIN veya herhangi bir ADMIN içeren rol yeterlidir
     if (!allowedRoles.some(role => userRole.includes(role))) {
         console.log('❌ Rol kontrolü başarısız: Bu kullanıcı işletme yöneticisi değil');
+        // Geliştirme modunda her kullanıcıya izin ver
+        if (process.env.NODE_ENV === 'development') {
+            console.warn('⚠️ Geliştirme modunda: Yetkisiz kullanıcıya erişim izni veriliyor');
+            console.log('✅ Geliştirme modu: BUSINESS_ADMIN rolü atanıyor');
+            req.user.role = 'BUSINESS_ADMIN';
+            next();
+            return;
+        }
         return res.status(403).json({
             success: false,
             message: 'Bu özelliği kullanmanız için işletme admini olmanız gerekmektedir.'
@@ -83,45 +117,130 @@ exports.debugRoleCheck = debugRoleCheck;
  * Rol standart kontrolden geçemese bile belirli koşullarda izin verir
  */
 const flexibleRoleCheck = (req, res, next) => {
-    console.log('🔄 Esnek rol kontrolü yapılıyor');
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    console.log('Esnek rol kontrolü, geliştirme modu:', isDevelopment);
+    // Geliştirme modunda ve kullanıcı bilgisi mevcut değilse
+    if (isDevelopment && !req.user) {
+        console.log('⚠️ Geliştirme modu - Auth kontrolü atlıyor');
+        req.user = {
+            _id: 'dev-user-id',
+            role: UserRole_1.UserRole.SUPER_ADMIN,
+            name: 'Geliştirici',
+            email: 'developer@example.com'
+        };
+        req.isAuthenticated = true;
+        return next();
+    }
+    // Eğer kullanıcı zaten mevcut ve admin rolündeyse veya CUSTOMER ise, devam et
+    if (req.user && (req.user.role === UserRole_1.UserRole.SUPER_ADMIN ||
+        req.user.role === UserRole_1.UserRole.BUSINESS_ADMIN ||
+        req.user.role === UserRole_1.UserRole.CUSTOMER)) {
+        console.log('✅ Kullanıcı geçerli role sahip, izin veriliyor');
+        return next();
+    }
+    // Kullanıcı mevcut değilse ve geliştirme modunda değilsek, hata döndür
     if (!req.user) {
-        console.log('⚠️ Kullanıcı bilgisi bulunamadı, kullanıcı olmadan devam edilemiyor');
+        console.warn('❌ Kullanıcı bilgisi bulunamadı, kimlik doğrulama başarısız');
         return res.status(401).json({
             success: false,
-            message: 'Bu işlemi yapmak için giriş yapmalısınız'
+            message: 'Bu işlem için giriş yapmanız gerekiyor'
         });
     }
-    // Business ID atama kontrolü - BUSINESS_ADMIN kullanıcıları için
-    if (String(req.user.role || '').toUpperCase().includes('ADMIN') && !req.user.business && req.user.id) {
-        req.user.business = `business_${req.user.id}`;
-        console.log('✅ Esnek mod: Otomatik business ID atandı:', req.user.business);
-    }
-    // Normal rol kontrolü
-    const userRole = String(req.user.role || '').toUpperCase();
-    const allowedRoles = ['BUSINESS_ADMIN', 'SUPER_ADMIN', 'ADMIN'];
-    if (allowedRoles.some(role => userRole.includes(role))) {
-        console.log('✅ Standart rol kontrolü başarılı');
-        return next();
-    }
-    console.log('⚠️ Standart rol kontrolü başarısız, alternatif kontroller deneniyor');
-    // E-posta adresi belirli bir alan adını içeriyorsa izin ver
-    if (req.user.email && (req.user.email.endsWith('@example.com') ||
-        req.user.email.includes('admin') ||
-        req.user.email.includes('test'))) {
-        console.log('✅ E-posta adresine göre izin verildi:', req.user.email);
-        return next();
-    }
-    // Kullanıcı ID'si varsa izin ver (geliştirme/test aşaması için)
-    if (req.user.id) {
-        console.log('✅ Test/geliştirme modu - kullanıcı ID kontrolü ile geçiş yapılıyor');
-        console.log('⚠️ NOT: Bu yalnızca test/geliştirme aşamasında kullanılmalıdır!');
-        return next();
-    }
-    // Hiçbir koşul karşılanmadıysa erişimi reddet
-    console.log('❌ Tüm esneklik kontrolleri başarısız, erişim reddedildi');
+    // Kullanıcı mevcut ancak yetkisi yetersizse, hata döndür
+    console.warn('❌ Yetkisiz erişim, kullanıcı rolü:', req.user.role);
     return res.status(403).json({
         success: false,
-        message: 'Bu özelliği kullanmak için gerekli yetkiye sahip değilsiniz'
+        message: 'Bu işlem için yetkiniz bulunmuyor'
     });
 };
 exports.flexibleRoleCheck = flexibleRoleCheck;
+// Light-weight auth middleware
+const lightAuth = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    console.log('Light auth middleware başlatıldı');
+    try {
+        // Geliştirme modunda mı?
+        const isDevelopment = process.env.NODE_ENV === 'development';
+        // Token kontrolü yap
+        let token;
+        if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+            token = req.headers.authorization.split(' ')[1];
+        }
+        else if (req.cookies && req.cookies.token) {
+            token = req.cookies.token;
+        }
+        // Token yoksa ve geliştirme modundaysak
+        if (!token && isDevelopment) {
+            console.log('⚠️ DEV MODU: Token yok, test kullanıcısı oluşturuluyor');
+            req.user = {
+                _id: 'light-auth-user',
+                role: UserRole_1.UserRole.BUSINESS_ADMIN,
+                name: 'Test Kullanıcı',
+                email: 'lightauth@example.com',
+                business: req.params.businessId || req.query.businessId
+            };
+            req.isAuthenticated = true;
+            return next();
+        }
+        // Token yoksa hata döndür
+        if (!token) {
+            return res.status(401).json({
+                success: false,
+                message: 'Bu işlem için giriş yapmanız gerekiyor'
+            });
+        }
+        // Token doğrulama
+        try {
+            const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET || 'gizlianahtar');
+            // Kullanıcıyı bul
+            const user = yield User_1.default.findById(decoded.id).select('-password');
+            if (!user) {
+                throw new Error('Kullanıcı bulunamadı');
+            }
+            // Kullanıcıyı request'e ekle
+            req.user = user;
+            req.isAuthenticated = true;
+            next();
+        }
+        catch (error) {
+            console.error('Token doğrulama hatası:', error);
+            // Geliştirme modundaysa, token hatasını görmezden gel
+            if (isDevelopment) {
+                console.log('⚠️ DEV MODU: Token hatası görmezden geliniyor, test kullanıcısı oluşturuluyor');
+                req.user = {
+                    _id: 'token-error-user',
+                    role: UserRole_1.UserRole.BUSINESS_ADMIN,
+                    name: 'Token Hata Kullanıcısı',
+                    email: 'tokenerror@example.com',
+                    business: req.params.businessId || req.query.businessId
+                };
+                req.isAuthenticated = true;
+                return next();
+            }
+            return res.status(401).json({
+                success: false,
+                message: 'Geçersiz token, lütfen tekrar giriş yapın'
+            });
+        }
+    }
+    catch (error) {
+        console.error('Light auth middleware genel hata:', error);
+        // Geliştirme modunda mı?
+        const isDevelopment = process.env.NODE_ENV === 'development';
+        if (isDevelopment) {
+            console.log('⚠️ DEV MODU: Genel hata görmezden geliniyor');
+            req.user = {
+                _id: 'error-recovery-user',
+                role: UserRole_1.UserRole.SUPER_ADMIN,
+                name: 'Hata Kurtarma Kullanıcısı',
+                email: 'errorrecovery@example.com'
+            };
+            req.isAuthenticated = true;
+            return next();
+        }
+        return res.status(500).json({
+            success: false,
+            message: 'Sunucu hatası'
+        });
+    }
+});
+exports.lightAuth = lightAuth;
